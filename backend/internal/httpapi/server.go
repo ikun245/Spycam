@@ -55,7 +55,7 @@ func (s *Server) Handler() http.Handler {
 	r.Handle("GET /api/v1/alert-groups", authed(http.HandlerFunc(s.handleListGroups)))
 	r.Handle("GET /api/v1/incidents", authed(http.HandlerFunc(s.handleListIncidents)))
 	r.Handle("GET /api/v1/incidents/{id}", authed(http.HandlerFunc(s.handleGetIncident)))
-	r.Handle("GET /api/v1/pcaps", authed(http.HandlerFunc(s.notImplemented)))
+	r.Handle("GET /api/v1/pcaps", authed(http.HandlerFunc(s.handleListPcaps)))
 	r.Handle("GET /api/v1/replay-tasks", authed(http.HandlerFunc(s.handleListTasks)))
 	r.Handle("GET /api/v1/replay-tasks/{id}", authed(http.HandlerFunc(s.handleGetTask)))
 	r.Handle("GET /api/v1/engine/status", authed(http.HandlerFunc(s.handleEngineStatusV2)))
@@ -156,10 +156,6 @@ func (s *Server) handleEngineStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
-}
-
-func (s *Server) notImplemented(w http.ResponseWriter, _ *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "not implemented in skeleton")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

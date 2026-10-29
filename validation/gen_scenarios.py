@@ -233,7 +233,6 @@ def gen_c2_beacon():
     pkts = []
     C2_SERVER = "198.51.100.10"
     sport = 46000
-    idx = 0
     expectations = []
     for k, client in enumerate(CLIENTS[:2]):
         t0 = BASE + k * 120  # 时间窗隔离
@@ -241,7 +240,7 @@ def gen_c2_beacon():
             pkts.extend(
                 http_flow(
                     client, C2_SERVER, sport, 80, "/api/collect",
-                    method="POST", host="cdn-metrics.example.com", t=ts(idx, step=2.0) if k == 0 else t0 + i * 2.0,
+                    method="POST", host="cdn-metrics.example.com", t=t0 + i * 2.0,
                 )
             )
             sport += 1
@@ -257,7 +256,6 @@ def gen_c2_beacon():
                 "min_count": 1,
             }
         )
-        idx += 30
     return pkts, {
         "pcap": "c2_beacon.pcap",
         "scenario": "c2_beacon",

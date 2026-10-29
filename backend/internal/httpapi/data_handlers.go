@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,28 +61,99 @@ func (s *Server) handleUploadPcap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer out.Close()
-	size, err := io.Copy(out, file)
+	// 落盘的同时计算全文件 sha256，避免二次读盘
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(out, hasher), file)
 	if err != nil {
+		_ = os.Remove(storedPath)
 		writeErr(w, http.StatusInternalServerError, "write failed")
 		return
 	}
+	sum := hex.EncodeToString(hasher.Sum(nil))
 
-	sum := sha256.Sum256(magic) // P0: 全量哈希在 P2 评测阶段补
-	_ = sum
 	q := gen.New(s.pool)
 	if err := q.CreatePcap(r.Context(), gen.CreatePcapParams{
 		ID:           id.String(),
 		OriginalName: sanitizeName(r.FormValue("name")),
 		StoredPath:   storedPath,
 		SizeBytes:    size,
+		Sha256:       pgtype.Text{String: sum, Valid: true},
 		SampleType:   r.FormValue("sample_type"),
 	}); err != nil {
+		_ = os.Remove(storedPath)
 		writeErr(w, http.StatusInternalServerError, "db insert failed")
 		return
 	}
 	s.audit(r.Context(), actor(r), auditPcapUpload, id.String(),
 		map[string]any{"name": sanitizeName(r.FormValue("name")), "size": size})
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "size": size})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "size": size, "sha256": sum})
+}
+
+// pcapView 是对外的 pcap 视图：不暴露容器内 stored_path（错误/响应不泄露内部路径）。
+type pcapView struct {
+	ID           string     `json:"id"`
+	OriginalName string     `json:"original_name"`
+	SizeBytes    int64      `json:"size_bytes"`
+	PacketCount  *int64     `json:"packet_count"`
+	Sha256       *string    `json:"sha256"`
+	SampleType   string     `json:"sample_type"`
+	CreatedAt    *time.Time `json:"created_at"`
+}
+
+func toPcapView(p gen.Pcap) pcapView {
+	v := pcapView{ID: p.ID, OriginalName: p.OriginalName, SizeBytes: p.SizeBytes, SampleType: p.SampleType}
+	if p.PacketCount.Valid {
+		n := p.PacketCount.Int64
+		v.PacketCount = &n
+	}
+	if p.Sha256.Valid {
+		h := p.Sha256.String
+		v.Sha256 = &h
+	}
+	if p.CreatedAt.Valid {
+		t := p.CreatedAt.Time
+		v.CreatedAt = &t
+	}
+	return v
+}
+
+// parsePageParams 解析 limit/offset：limit 默认 50、上限 200，offset 非负。
+func parsePageParams(q url.Values) (limit, offset int32, err error) {
+	limit = 50
+	if s := q.Get("limit"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 1 || n > 200 {
+			return 0, 0, fmt.Errorf("limit must be 1..200")
+		}
+		limit = int32(n)
+	}
+	if s := q.Get("offset"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 0 || n > 1_000_000 {
+			return 0, 0, fmt.Errorf("offset must be 0..1000000")
+		}
+		offset = int32(n)
+	}
+	return limit, offset, nil
+}
+
+// handleListPcaps 架构设计 §6.3 GET /pcaps（viewer+）。
+func (s *Server) handleListPcaps(w http.ResponseWriter, r *http.Request) {
+	limit, offset, err := parsePageParams(r.URL.Query())
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rows, err := gen.New(s.pool).ListPcaps(r.Context(), gen.ListPcapsParams{Limit: limit, Offset: offset})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db query failed")
+		return
+	}
+	items := make([]pcapView, 0, len(rows))
+	for _, p := range rows {
+		items = append(items, toPcapView(p))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": offset})
 }
 
 // handleCreateTask 创建回放任务并入队（Redis 唤醒，PG 是真相）。

@@ -79,7 +79,8 @@ docker compose --profile tools run --rm validator
 - jasonish/suricata 基础镜像声明 VOLUME：更新内置规则后需 `--renew-anon-volumes`（见 agent-log/bugs.md Bug-5）
 - 实时推送以“回放任务”为粒度：离线回放模式下告警在任务采集完成时批量入库，因此推送的是任务完成事件（含新增告警数），而非逐条告警
 - 登录锁定按用户名计数，存在被他人故意触发锁定管理员账号的风险（15 分钟自动解除），未做 IP 维度限速
-- `GET /pcaps`、`GET /rules/{sid}` 仍为占位/未注册；agent `POST /v1/validate-rules` 为占位，校验合并在重载流程内完成
+- `GET /rules/{sid}` 未注册（规则原文无查看入口）；agent `POST /v1/validate-rules` 为占位，校验合并在重载流程内完成
+- 前端「数据与回放」页尚未展示 `GET /pcaps` 列表（接口已实现）
 - 本轮新增查询的 sqlc 生成代码因宿主机 sqlc 不可用为手工按 sqlc 1.27 格式编写，需在 Docker 内 `sqlc generate` 比对（见 agent-log/decisions.md）
 
 ## 目录
