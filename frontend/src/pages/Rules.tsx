@@ -1,4 +1,4 @@
-import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Switch, Table, Tag, Tooltip } from 'antd';
+import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -40,6 +40,12 @@ export default function Rules() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<CreateForm>();
+  const [viewSid, setViewSid] = useState<number | null>(null);
+  const ruleRaw = useQuery({
+    queryKey: ['rule', viewSid],
+    queryFn: () => api.get<{ sid: number; raw: string }>(`/api/v1/rules/${viewSid}`),
+    enabled: viewSid !== null,
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['rules'],
@@ -150,10 +156,38 @@ export default function Rules() {
         />
       ),
     },
+    {
+      title: '原文',
+      width: 80,
+      render: (_: unknown, row: RuleItem) => (
+        <Button type="link" size="small" onClick={() => setViewSid(row.sid)}>
+          查看
+        </Button>
+      ),
+    },
   ];
 
   return (
     <>
+      <Modal
+        title={`规则 ${viewSid ?? ''} 原文`}
+        open={viewSid !== null}
+        onCancel={() => setViewSid(null)}
+        footer={null}
+        width={760}
+      >
+        {ruleRaw.isLoading ? (
+          <Spin />
+        ) : ruleRaw.error ? (
+          <Typography.Text type="danger">{(ruleRaw.error as Error).message}</Typography.Text>
+        ) : (
+          <Typography.Paragraph copyable={{ text: ruleRaw.data?.raw ?? '' }}>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+              {ruleRaw.data?.raw ?? ''}
+            </pre>
+          </Typography.Paragraph>
+        )}
+      </Modal>
       <Card
         title="检测规则管理"
         extra={

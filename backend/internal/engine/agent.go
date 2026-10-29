@@ -163,9 +163,60 @@ func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxValidateBytes 候选规则文本上限，防止超大请求拖垮校验进程。
+const maxValidateBytes = 256 << 10
+
+// handleValidate 把候选规则写入临时文件，用 `suricata -T -S <file>` 只校验该文件（不影响运行中的规则集）。
 func (a *AgentServer) handleValidate(w http.ResponseWriter, r *http.Request) {
-	// 占位：真实实现把候选规则写入临时文件再 suricata -T；骨架期直接返回 501
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not implemented in skeleton"})
+	var req struct {
+		Rules string `json:"rules"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxValidateBytes+1024)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"rules\":string}"})
+		return
+	}
+	if strings.TrimSpace(req.Rules) == "" || len(req.Rules) > maxValidateBytes {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rules must be non-empty and <= 256KiB"})
+		return
+	}
+	dir, err := os.MkdirTemp("", "spycam-validate-")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create temp dir failed"})
+		return
+	}
+	defer os.RemoveAll(dir)
+	ruleFile := dir + "/candidate.rules"
+	if err := os.WriteFile(ruleFile, []byte(req.Rules), 0o600); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write temp rules failed"})
+		return
+	}
+	start := time.Now()
+	cmd := exec.CommandContext(r.Context(), a.suriBin, "-T",
+		"-c", "/etc/suricata/suricata.yaml",
+		"-S", ruleFile,
+		"-l", dir)
+	out, err := cmd.CombinedOutput()
+	resp := map[string]any{"valid": err == nil, "elapsed_ms": time.Since(start).Milliseconds()}
+	if err != nil {
+		resp["detail"] = strings.ReplaceAll(strings.TrimSpace(string(out)), dir+"/", "")
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ValidateRules 调用 agent 对候选规则做 suricata -T 校验；返回 (是否通过, 失败详情)。
+func (c *Client) ValidateRules(ctx context.Context, rulesText string) (bool, string, error) {
+	buf, err := json.Marshal(map[string]string{"rules": rulesText})
+	if err != nil {
+		return false, "", err
+	}
+	var out struct {
+		Valid  bool   `json:"valid"`
+		Detail string `json:"detail"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/validate-rules", bytes.NewReader(buf), &out); err != nil {
+		return false, "", err
+	}
+	return out.Valid, out.Detail, nil
 }
 
 func isUUID(s string) bool {

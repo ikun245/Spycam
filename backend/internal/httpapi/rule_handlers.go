@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"spycam/backend/internal/rules"
 	"spycam/backend/internal/store/gen"
@@ -21,6 +22,35 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 		rows = []gen.ListRulesRow{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": rows})
+}
+
+// handleGetRule 规则原文查看（架构设计 §6.3 GET /rules/{sid}，viewer+）。
+func (s *Server) handleGetRule(w http.ResponseWriter, r *http.Request) {
+	sid, err := strconv.ParseInt(r.PathValue("sid"), 10, 64)
+	if err != nil || sid <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad sid")
+		return
+	}
+	rule, err := gen.New(s.pool).GetRule(r.Context(), sid)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "rule not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// lastLine 取引擎输出的最后一行非空内容作为错误摘要，避免把整段日志回传给前端。
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			if len(l) > 300 {
+				l = l[:300]
+			}
+			return l
+		}
+	}
+	return "unknown error"
 }
 
 // handleToggleRule 规则启停（M4：改完必须真的生效）。

@@ -52,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	r.Handle("GET /api/v1/alerts/{id}", authed(http.HandlerFunc(s.handleGetAlertRaw)))
 	r.Handle("GET /api/v1/overview", authed(http.HandlerFunc(s.handleOverview)))
 	r.Handle("GET /api/v1/rules", authed(http.HandlerFunc(s.handleListRules)))
+	r.Handle("GET /api/v1/rules/{sid}", authed(http.HandlerFunc(s.handleGetRule)))
 	r.Handle("GET /api/v1/alert-groups", authed(http.HandlerFunc(s.handleListGroups)))
 	r.Handle("GET /api/v1/incidents", authed(http.HandlerFunc(s.handleListIncidents)))
 	r.Handle("GET /api/v1/incidents/{id}", authed(http.HandlerFunc(s.handleGetIncident)))

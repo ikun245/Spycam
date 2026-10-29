@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,22 @@ func TestParsePageParams(t *testing.T) {
 				t.Fatalf("got (%d,%d), want (%d,%d)", limit, offset, tc.wantLimit, tc.wantOffset)
 			}
 		})
+	}
+}
+
+func TestLastLine(t *testing.T) {
+	cases := map[string]string{
+		"":                                     "unknown error",
+		"a\nb\n\n  ":                           "b",
+		"Info: x\nError: bad rule at line 1\n": "Error: bad rule at line 1",
+	}
+	for in, want := range cases {
+		if got := lastLine(in); got != want {
+			t.Fatalf("lastLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := lastLine(strings.Repeat("x", 500)); len(got) != 300 {
+		t.Fatalf("long line not truncated: %d", len(got))
 	}
 }
 

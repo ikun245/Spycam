@@ -132,6 +132,14 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "规则语法校验失败: "+err.Error())
 		return
 	}
+	// 3b. 写库前先让引擎单独校验候选规则（不影响运行中的规则集），坏规则不进库也不触发回滚
+	if ok, detail, err := s.agent.ValidateRules(r.Context(), raw+"\n"); err != nil {
+		writeErr(w, http.StatusBadGateway, "engine agent unreachable")
+		return
+	} else if !ok {
+		writeErr(w, http.StatusBadRequest, "引擎校验失败: "+lastLine(detail))
+		return
+	}
 
 	// 4. 写库 + 生成规则文件 + 校验 + 热重载（与启停同一链路，失败回滚）
 	severity := pgtype.Int4{Int32: int32(req.Severity), Valid: true}
