@@ -4,10 +4,11 @@
 判定口径（需求梳理 §5.3）：
 - TP：存在至少一条告警 sid 匹配、五元组匹配（目的端口在范围内）、时间落在期望窗内
 - FN：某条期望完全无命中
-- FP：负样本 pcap 的任意告警；或攻击 pcap 中不匹配任何期望的告警
+- FP：负样本 pcap 的任意告警；或攻击 pcap 中不匹配任何期望的告警（不按 sid 豁免）
 """
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,7 +27,17 @@ def iso_to_dt(s):
 
 
 def parse_eve_ts(s):
-    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f%z")
+    """兼容 Go RFC3339Nano（整秒无小数、Z 后缀、最多 9 位小数）与 Suricata +0000 格式。
+    解析失败必须抛出而不是静默跳过，否则严格口径下会被误计为 FP。"""
+    s = s.replace("Z", "+00:00")
+    m = re.match(r"^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2}:?\d{2})$", s)
+    if not m:
+        raise ValueError(f"unparseable ts: {s}")
+    base, frac, tz = m.groups()
+    frac = (frac or "0")[:6].ljust(6, "0")
+    if ":" not in tz:
+        tz = tz[:3] + ":" + tz[3:]
+    return datetime.fromisoformat(f"{base}.{frac}{tz}")
 
 
 def login(session):
@@ -80,10 +91,7 @@ def evaluate_expectation(exp, alerts):
         if dp is None or not (lo <= dp <= hi):
             continue
         if ws or we:
-            try:
-                ts = parse_eve_ts(a["ts"])
-            except Exception:
-                continue
+            ts = parse_eve_ts(a["ts"])
             if ws and ts < ws:
                 continue
             if we and ts > we:
@@ -156,8 +164,9 @@ def evaluate_one(session, gt):
         )
         matched_ids.update(ids)
 
-    exp_sids = {exp["sid"] for exp in gt["expected_alerts"]}
-    fps = [a for a in alerts if a["id"] not in matched_ids and a["sid"] not in exp_sids]
+    # 严格 §5.3：未被任何期望（sid+五元组+时间窗）匹配的告警一律计 FP，
+    # 不因 sid 出现在期望集合里而豁免
+    fps = [a for a in alerts if a["id"] not in matched_ids]
 
     if gt["benign"]:
         tp, fn = 0, 0
@@ -179,6 +188,7 @@ def evaluate_one(session, gt):
         "task_id": t["id"],
         "task_status": final["status"],
         "alert_count": len(alerts),
+        "matched_alert_count": 0 if gt["benign"] else len(matched_ids),
         "tp": tp,
         "fp": fp,
         "fn": fn,
@@ -187,7 +197,13 @@ def evaluate_one(session, gt):
         "f1": round(f1, 4),
         "expectations": per_exp,
         "fp_samples": [
-            {"sid": a["sid"], "src_ip": a["src_ip"], "dest_port": a.get("dest_port")}
+            {
+                "sid": a["sid"],
+                "src_ip": a["src_ip"],
+                "dest_ip": a.get("dest_ip"),
+                "dest_port": a.get("dest_port"),
+                "ts": a.get("ts"),
+            }
             for a in fps[:10]
         ],
     }
@@ -195,6 +211,8 @@ def evaluate_one(session, gt):
 
 def main():
     session = requests.Session()
+    # 后端对非 GET 请求做 CSRF 自定义头校验（架构设计 §6.6），脚本客户端同样需要携带
+    session.headers["X-Requested-With"] = "spycam"
     login(session)
 
     gt_files = sorted((OUT / "ground_truth").glob("*.json"))
@@ -219,16 +237,28 @@ def main():
     fn_total = sum(s["fn"] for s in scenarios)
     g_precision = tp_total / (tp_total + fp_total) if (tp_total + fp_total) else 0.0
     g_recall = tp_total / (tp_total + fn_total) if (tp_total + fn_total) else 1.0
+    alerts_total = sum(s["alert_count"] for s in scenarios)
+    matched_total = sum(s["matched_alert_count"] for s in scenarios)
+    alert_precision = matched_total / alerts_total if alerts_total else 1.0
+    pred_ok = sum(1 for v in variants if v["prediction_correct"])
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
+        "criteria": (
+            "需求梳理 §5.3（严格口径）：TP=期望条目被 sid+五元组+时间窗全匹配的告警命中；"
+            "FN=期望条目无命中；FP=负样本任意告警，或攻击样本中未匹配任何期望条目的告警（不按 sid 豁免）。"
+            "alert_precision=被期望匹配的告警数/总告警数，作为告警级补充指标"
+        ),
         "overall": {
             "tp": tp_total,
             "fp": fp_total,
             "fn": fn_total,
             "precision": round(g_precision, 4),
             "recall": round(g_recall, 4),
+            "alert_count": alerts_total,
+            "matched_alert_count": matched_total,
+            "alert_precision": round(alert_precision, 4),
+            "variant_predictions_correct": f"{pred_ok}/{len(variants)}",
         },
         "scenarios": scenarios,
         "variants": variants,
@@ -242,21 +272,24 @@ def main():
         "",
         f"生成时间：{report['generated_at']}",
         "",
-        f"总体：TP={tp_total} FP={fp_total} FN={fn_total} "
-        f"Precision={report['overall']['precision']} Recall={report['overall']['recall']}",
+        f"判定口径：{report['criteria']}",
         "",
-        "| 场景 | pcap | 告警数 | TP | FP | FN | P | R | F1 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        f"总体：TP={tp_total} FP={fp_total} FN={fn_total} "
+        f"Precision={report['overall']['precision']} Recall={report['overall']['recall']}；"
+        f"告警级 Precision={report['overall']['alert_precision']}（{matched_total}/{alerts_total}）",
+        "",
+        "| 场景 | pcap | 告警数 | 匹配告警 | TP | FP | FN | P | R | F1 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for s in scenarios:
         lines.append(
-            f"| {s['scenario']} | {s['pcap']} | {s['alert_count']} | {s['tp']} | "
+            f"| {s['scenario']} | {s['pcap']} | {s['alert_count']} | {s['matched_alert_count']} | {s['tp']} | "
             f"{s['fp']} | {s['fn']} | {s['precision']} | {s['recall']} | {s['f1']} |"
         )
     if variants:
         lines += [
             "",
-            "## 变异测试（§5.5：先预判，再验证）",
+            f"## 变异测试（§5.5：先预判，再验证；预判正确 {pred_ok}/{len(variants)}）",
             "",
             "| 变种 | 基线场景 | 预判 | 实际 | 是否命中预判 | 预判依据 |",
             "|---|---|---|---|---|---|",

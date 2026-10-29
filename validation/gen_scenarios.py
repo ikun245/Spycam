@@ -149,33 +149,32 @@ def gen_web_attacks():
                 pkts.extend(http_flow(src, dst, sport, 80, uri, t=ts(idx, step=0.1)))
                 sport += 1
                 idx += 1
+    # §5.2 要求逐项枚举：3 个源→目的对 × {SQLi, XSS} 共 6 条期望，
+    # 否则严格 §5.3 口径下未枚举的真实攻击告警会被误计为 FP
+    expectations = []
+    for k in range(3):
+        for sid, msg in (
+            (1000003, "SPYCAM SQLi UNION SELECT in URI or body"),
+            (1000004, "SPYCAM XSS script tag with event handler"),
+        ):
+            expectations.append(
+                {
+                    "sid": sid,
+                    "msg": msg,
+                    "src_ip": ATTACKERS[k],
+                    "dst_ip": VICTIMS[k],
+                    "dst_port_range": [80, 80],
+                    "proto": "TCP",
+                    "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 60)},
+                    "min_count": 1,
+                }
+            )
     return pkts, {
         "pcap": "web_attacks.pcap",
         "scenario": "web_sqli_xss",
         "benign": False,
         "description": "3 个外网源对 3 台 Web 资产分布式 SQLi+XSS（完整 TCP 会话）",
-        "expected_alerts": [
-            {
-                "sid": 1000003,
-                "msg": "SPYCAM SQLi UNION SELECT in URI or body",
-                "src_ip": ATTACKERS[0],
-                "dst_ip": VICTIMS[0],
-                "dst_port_range": [80, 80],
-                "proto": "TCP",
-                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 60)},
-                "min_count": 1,
-            },
-            {
-                "sid": 1000004,
-                "msg": "SPYCAM XSS script tag with event handler",
-                "src_ip": ATTACKERS[1],
-                "dst_ip": VICTIMS[1],
-                "dst_port_range": [80, 80],
-                "proto": "TCP",
-                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 60)},
-                "min_count": 1,
-            },
-        ],
+        "expected_alerts": expectations,
         "known_limitations": [],
     }
 
@@ -183,6 +182,7 @@ def gen_web_attacks():
 def gen_dns_tunnel():
     pkts = []
     alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    tunnels = []
     # 2 台失陷终端各自产生隧道查询（各自独立命中）
     for k, client in enumerate(CLIENTS[:2]):
         t0 = BASE + k * 30
@@ -195,8 +195,7 @@ def gen_dns_tunnel():
             )
             p.time = t0 + i * 0.2
             pkts.append(p)
-        if k == 0:
-            tun_src, tun_t0, tun_t1 = client, t0, t0 + 16
+        tunnels.append((client, t0, t0 + 16))
     # 混入其他终端的正常 DNS 作对照
     for i in range(40):
         c = CLIENTS[2 + (i % 2)]
@@ -216,13 +215,14 @@ def gen_dns_tunnel():
             {
                 "sid": 1000005,
                 "msg": "SPYCAM DNS tunnel long label query",
-                "src_ip": CLIENTS[0],
+                "src_ip": src,
                 "dst_ip": DNS_SERVER,
                 "dst_port_range": [53, 53],
                 "proto": "UDP",
-                "window": {"start": epoch_to_iso(tun_t0), "end": epoch_to_iso(tun_t1)},
+                "window": {"start": epoch_to_iso(t0), "end": epoch_to_iso(t1)},
                 "min_count": 1,
             }
+            for src, t0, t1 in tunnels
         ],
         "known_limitations": [],
     }

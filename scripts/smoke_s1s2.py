@@ -10,6 +10,7 @@ BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8080")
 PCAP = sys.argv[1] if len(sys.argv) > 1 else "data/syn_scan_smoke.pcap"
 
 s = requests.Session()
+s.headers["X-Requested-With"] = "spycam"  # 后端 CSRF 头校验
 r = s.post(f"{BASE}/api/v1/auth/login", json={"username": "admin", "password": "change-me-admin"})
 r.raise_for_status()
 

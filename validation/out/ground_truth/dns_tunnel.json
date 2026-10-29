@@ -19,6 +19,22 @@
         "end": "2026-01-01T00:00:16Z"
       },
       "min_count": 1
+    },
+    {
+      "sid": 1000005,
+      "msg": "SPYCAM DNS tunnel long label query",
+      "src_ip": "10.0.0.101",
+      "dst_ip": "10.0.0.53",
+      "dst_port_range": [
+        53,
+        53
+      ],
+      "proto": "UDP",
+      "window": {
+        "start": "2026-01-01T00:00:30Z",
+        "end": "2026-01-01T00:00:46Z"
+      },
+      "min_count": 1
     }
   ],
   "known_limitations": []
