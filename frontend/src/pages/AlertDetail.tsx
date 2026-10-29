@@ -1,8 +1,13 @@
-import { Card, Descriptions, Spin, Tag, Typography } from 'antd';
+import { Button, Card, Descriptions, Space, Spin, Tag, Tooltip, Typography } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { sevMeta, sevText, stageColor, stageText } from '../labels';
+
+// 取证下载是同源 GET，浏览器自动带 Cookie；参数经 URLSearchParams 编码
+const exportHref = (id: number, scope: 'flow' | 'hosts') =>
+  `/api/v1/alerts/${encodeURIComponent(String(id))}/pcap?${new URLSearchParams({ scope })}`;
 
 interface AlertDetail {
   alert: {
@@ -45,7 +50,24 @@ export default function AlertDetail() {
 
   const a = data.alert;
   return (
-    <Card title={`告警详情 #${a.id}`} extra={<Tag>{`sid ${a.sid}`}</Tag>}>
+    <Card
+      title={`告警详情 #${a.id}`}
+      extra={
+        <Space>
+          <Tooltip title="按双向五元组切出告警前 5 分钟至后 1 分钟的报文（需 analyst 权限）">
+            <Button size="small" icon={<DownloadOutlined />} href={exportHref(a.id, 'flow')}>
+              取证：本会话
+            </Button>
+          </Tooltip>
+          <Tooltip title="仅按 IP 对 + 协议切片，适合扫描类告警（每个探测包源端口不同）">
+            <Button size="small" icon={<DownloadOutlined />} href={exportHref(a.id, 'hosts')}>
+              取证：主机对
+            </Button>
+          </Tooltip>
+          <Tag>{`sid ${a.sid}`}</Tag>
+        </Space>
+      }
+    >
       <Descriptions bordered size="small" column={2}>
         <Descriptions.Item label="时间">{new Date(a.ts).toLocaleString('zh-CN')}</Descriptions.Item>
         <Descriptions.Item label="入库时间">

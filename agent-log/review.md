@@ -21,10 +21,12 @@
 | 2026-10-30 | `httpapi/rule_create_handler.go` | 规则内容注入 | ❌ `src_ip/ports/mitre_*` 未校验直接拼进规则体；`msg` 的 ASCII 回退保留了 `"` `;` `\`，可提前闭合 msg 注入 `pcre` 等关键字 | 地址/端口/metadata 正则白名单 + msg 剥离三种元字符；创建失败回滚时补做规则文件重生成（原先只改 DB，坏规则留在文件里使之后每次重载都失败） |
 | 2026-10-30 | `httpapi/server.go` `clientIP` | 日志伪造 | ⚠️ AI 初稿取 X-Forwarded-For 最左值写审计；nginx 用 `$proxy_add_x_forwarded_for` 是**追加**，最左值可被客户端伪造 | 改取最右值（nginx 写入的真实对端），单测覆盖伪造场景 |
 | 2026-10-30 | `pages/AuditLog.tsx` | XSS | ✅ 审计详情含用户输入（规则原文、处置备注），`JSON.stringify` 后以文本节点渲染，无 `dangerouslySetInnerHTML` | — |
+| 2026-10-30 | `pcapslice/pcapslice.go`（取证切片解析器） | 不可信输入解析 / DoS | ⚠️ 解析用户上传的 pcap：单包长度字段可被伪造成 4GB 触发超大分配 | 单包上限 256KiB，超限直接报错返回 422；末尾不完整记录（抓包中断）丢弃该条并以 `X-Source-Truncated` 声明；只认经典 pcap 魔数与 8 种链路类型，其余回退整文件；`scope` 仅 `flow`/`hosts` 白名单；导出写审计 `pcap.export`。表驱动测试 + 仓库真实 Scapy pcap 回归 |
+| 2026-10-30 | `engine/agent.go` `handleValidate` | 命令注入 / 临时文件 | ✅ 候选规则只写入 `os.MkdirTemp` 私有目录（0600）并以参数数组传 `-S`，无 shell；请求体 256KiB 上限；错误详情剥离临时路径 | — |
 
 ## 已知边界（如实声明，详见 README）
 
 - 本地演示为 HTTP：Cookie `Secure` 属性留部署环境配置
 - Suricata 解析不可信 pcap 存在引擎自身漏洞风险，靠容器隔离缓解
 - `govulncheck` 未执行（见上）
-- 取证导出当前回传整段 pcap（按时间/五元组切片未实现），响应头已声明过滤条件
+- 取证切片只支持经典 pcap；pcapng 回退整文件并以 `X-Filter-Applied: false` 声明

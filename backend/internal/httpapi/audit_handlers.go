@@ -24,6 +24,7 @@ const (
 	auditGroupTriage = "group.triage"
 	auditPcapUpload  = "pcap.upload"
 	auditTaskCreate  = "task.create"
+	auditPcapExport  = "pcap.export"
 )
 
 // audit 写审计日志。审计是旁路记录：失败只打日志，不阻断业务主流程。

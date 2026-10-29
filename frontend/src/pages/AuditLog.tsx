@@ -22,6 +22,7 @@ const actionMeta: Record<string, { text: string; color: string }> = {
   'group.triage': { text: '告警处置', color: 'purple' },
   'pcap.upload': { text: '上传样本', color: 'cyan' },
   'task.create': { text: '创建回放', color: 'cyan' },
+  'pcap.export': { text: '取证导出', color: 'gold' },
 };
 
 const columns: ColumnsType<AuditItem> = [

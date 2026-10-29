@@ -71,7 +71,7 @@ docker compose --profile tools run --rm validator
 
 ## 当前已知缺陷（如实声明）
 
-- 取证导出回传整段 pcap，按时间/五元组切片未实现（响应头已声明过滤条件）
+- 取证导出仅支持经典 pcap 切片（双向五元组/主机对 + 告警前 5 分钟至后 1 分钟）；pcapng 回退整文件并以 `X-Filter-Applied: false` 声明，时间窗为固定值
 - S3 事件串联的 gap 与 S1 窗口为固定/环境变量值，未做界面配置
 - `govulncheck` 未执行（宿主 32 位 Go 编译受限）；npm audit 已清零
 - 本地演示为 HTTP，Cookie `Secure` 留生产配置
