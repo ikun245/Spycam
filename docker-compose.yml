@@ -57,11 +57,9 @@ services:
       RULES_ACTIVE_DIR: /rules-active
       PCAPS_DIR: /data/pcaps
       ENGINE_AGENT_URL: http://suricata:9090
-      VALIDATION_DIR: /app/validation
     volumes:
       - pcaps:/data/pcaps
       - rules-active:/rules-active
-      - ./validation/out:/app/validation:ro
     depends_on:
       postgres:
         condition: service_healthy

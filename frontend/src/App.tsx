@@ -7,7 +7,6 @@ import AlertDetail from './pages/AlertDetail';
 import Groups from './pages/Groups';
 import Rules from './pages/Rules';
 import DataPage from './pages/Data';
-import Validation from './pages/Validation';
 import Incidents from './pages/Incidents';
 import Engine from './pages/Engine';
 
@@ -21,7 +20,6 @@ const menuItems = [
   { key: '/engine', label: '引擎状态' },
   { key: '/data', label: '数据与回放' },
   { key: '/rules', label: '规则管理' },
-  { key: '/validation', label: '自验报告' },
 ];
 
 export default function App() {
@@ -57,7 +55,6 @@ export default function App() {
                   <Route path="/engine" element={<Engine />} />
                   <Route path="/data" element={<DataPage />} />
                   <Route path="/rules" element={<Rules />} />
-                  <Route path="/validation" element={<Validation />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Content>

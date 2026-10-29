@@ -57,7 +57,6 @@ func (s *Server) Handler() http.Handler {
 	r.Handle("GET /api/v1/replay-tasks/{id}", authed(http.HandlerFunc(s.handleGetTask)))
 	r.Handle("GET /api/v1/engine/status", authed(http.HandlerFunc(s.handleEngineStatusV2)))
 	r.Handle("GET /api/v1/stream", authed(http.HandlerFunc(s.handleStream)))
-	r.Handle("GET /api/v1/validation/latest", authed(http.HandlerFunc(s.handleLatestReport)))
 
 	// analyst+
 	analyst := s.auth.Middleware("analyst")

@@ -41,8 +41,8 @@ docker compose --profile tools run --rm validator
 | M1 pcap 回放 | 上传（魔数校验+UUID 存储）→ 任务队列 → agent 调 Suricata `pcap-file` | 页面「数据与回放」 |
 | M2 IDS+自定义规则 | 6 条规则（含 stage/ATT&CK metadata），`suricata -T` 通过 | `docker compose exec suricata suricata -T ...` |
 | M3 采集归一化 | alert/flow/dns/http/tls/stats 落库，去重键幂等 | 数据库直查 |
-| M4 Web 界面 | 告警列表/详情/总览/规则管理 + 聚合/事件/引擎/自验报告页 | 浏览器 |
-| M5 数据自验 | 5 场景 + ground truth 先写后测 + 一条命令评测，**P=1.0 R=1.0 零误报** | `--profile tools run validator` |
+| M4 Web 界面 | 告警列表/详情/总览/规则管理 + 聚合/事件/引擎页（运营功能；自验报告为纯文件，不进界面） | 浏览器 |
+| M5 数据自验 | 5 场景 + ground truth 先写后测 + 一条命令评测，**P=1.0 R=1.0 零误报**；报告为纯文件产物（report.json/md），不进产品界面 | `--profile tools run validator` |
 | M6 可复现 | 镜像 tag 锁定、迁移种子自动执行、干净机器 compose up | 面试官复跑 |
 | M7 自身安全 | 参数数组 exec、sqlc 参数绑定、UUID 路径、CSP、非 root 容器、无 sock 挂载 | agent-log/review.md |
 | S1 聚合 | sid+五元组+N 秒窗口分桶，hit_count 累计 | 「聚合处置」页 |
@@ -67,7 +67,7 @@ docker compose --profile tools run --rm validator
 
 ```text
 backend/     Go 后端（api/worker/engine-agent，单元测试覆盖 eve/aggregate/rules）
-frontend/    React 前端（Vite+AntD+recharts，9 个页面）
+frontend/    React 前端（Vite+AntD+recharts，8 个页面，仅运营功能）
 suricata/    引擎镜像（suricata.yaml + engine-agent + entrypoint）
 rules/       自定义 Suricata 规则（seed 副本在 backend/seed-rules/）
 validation/  场景生成 + ground truth + 评测器（out/ 为报告产物）

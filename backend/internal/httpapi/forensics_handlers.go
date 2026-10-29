@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,36 +10,8 @@ import (
 	"spycam/backend/internal/store/gen"
 )
 
-// 自验报告与验证明细的落盘位置（validator 挂载到同一命名卷/目录）
-func reportDir() string {
-	if d := os.Getenv("VALIDATION_DIR"); d != "" {
-		return d
-	}
-	return "/app/validation"
-}
-
-// handleLatestReport 读取 validator 生成的 report.json / report.md（D3/D4 展示用）。
-func (s *Server) handleLatestReport(w http.ResponseWriter, r *http.Request) {
-	dir := reportDir()
-	raw, err := os.ReadFile(filepath.Join(dir, "report.json"))
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "no validation report yet; run `make validate`")
-		return
-	}
-	var report any
-	if err := json.Unmarshal(raw, &report); err != nil {
-		writeErr(w, http.StatusInternalServerError, "report.json is malformed")
-		return
-	}
-	md, _ := os.ReadFile(filepath.Join(dir, "report.md"))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"report": report,
-		"markdown": string(md),
-	})
-}
-
 // handleExportAlertPcap 告警取证（S4）：按告警时间戳 + 五元组从原 pcap 提取片段并下载。
-// 只读取服务端已存 pcap，不接受任何调用方给出的路径（M7 路径穿越防护）。
+// 只读取服务端已存 pcap，路径用数据库 UUID 重新拼接，不接受调用方路径（M7 防穿越）。
 func (s *Server) handleExportAlertPcap(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -71,8 +42,8 @@ func (s *Server) handleExportAlertPcap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 简化实现：按时间窗/五元组过滤需要逐包解析；当前直接回传整段 pcap，
-	// 响应头声明过滤条件，完整切片在 P2 后续实现（见 README 已知缺陷）。
+	// 简化实现：按时间窗/五元组过滤需逐包解析；当前回传整段 pcap，
+	// 响应头声明过滤条件，完整切片为已知缺陷（见 README）。
 	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="alert-%d-%s.pcap"`, alert.ID, pcap.ID[:8]))
