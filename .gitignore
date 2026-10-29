@@ -21,3 +21,6 @@ tmp/
 
 # 构建临时目录（esbuild TEMP 重定向）
 .tmp/
+
+# TS 增量构建信息
+*.tsbuildinfo
