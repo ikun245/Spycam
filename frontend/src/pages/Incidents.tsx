@@ -2,6 +2,7 @@ import { Card, Empty, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client';
+import { sevMeta, sevText, stageColor, stageText } from '../labels';
 
 interface Incident {
   id: number;
@@ -25,15 +26,6 @@ interface IncidentGroup {
   mitre_technique: string | null;
   stage_order: number;
 }
-
-const stageColor: Record<string, string> = {
-  recon: 'blue',
-  bruteforce: 'orange',
-  exploit: 'red',
-  c2: 'purple',
-  exfil: 'magenta',
-  unknown: 'default',
-};
 
 export default function Incidents() {
   const [selected, setSelected] = useState<number | null>(null);
@@ -60,7 +52,7 @@ export default function Incidents() {
           <span>
             {v.split(' → ').map((s, i) => (
               <Tag key={i} color={stageColor[s] ?? 'default'}>
-                {s}
+                {stageText(s)}
               </Tag>
             ))}
           </span>
@@ -68,7 +60,12 @@ export default function Incidents() {
           '-'
         ),
     },
-    { title: '最高 severity', dataIndex: 'severity', width: 110 },
+    {
+      title: '最高威胁等级',
+      dataIndex: 'severity',
+      width: 120,
+      render: (v: number | null) => (v ? <Tag color={sevMeta[v]?.tag}>{sevText(v)}</Tag> : '-'),
+    },
     {
       title: '开始',
       dataIndex: 'start_ts',
@@ -89,7 +86,7 @@ export default function Incidents() {
       title: '阶段',
       dataIndex: 'stage',
       width: 110,
-      render: (v: string | null) => <Tag color={stageColor[v ?? 'unknown']}>{v ?? 'unknown'}</Tag>,
+      render: (v: string | null) => <Tag color={v ? stageColor[v] : 'default'}>{v ? stageText(v) : '未分类'}</Tag>,
     },
     { title: '签名', dataIndex: 'signature', ellipsis: true },
     { title: '目的', dataIndex: 'dest_ip', render: (v: string) => <code>{v}</code> },

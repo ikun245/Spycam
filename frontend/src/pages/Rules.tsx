@@ -3,6 +3,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client';
+import { sevMeta, stageColor, stageNames } from '../labels';
 
 interface RuleItem {
   sid: number;
@@ -15,24 +16,6 @@ interface RuleItem {
   mitre_technique: string | null;
   source: string;
 }
-
-const stageColor: Record<string, string> = {
-  recon: 'blue',
-  bruteforce: 'orange',
-  exploit: 'red',
-  c2: 'purple',
-  exfil: 'magenta',
-};
-
-const stageNames: Record<string, string> = {
-  recon: '侦察探测',
-  bruteforce: '暴力破解',
-  exploit: '漏洞利用',
-  c2: '命令控制',
-  exfil: '数据外泄',
-};
-
-const sevNames: Record<number, string> = { 1: '高危', 2: '中危', 3: '低危' };
 
 interface CreateForm {
   protocol: string;
@@ -66,8 +49,9 @@ export default function Rules() {
   const toggle = async (sid: number, enabled: boolean) => {
     setToggling(sid);
     try {
-      await api.patch(`/api/v1/rules/${sid}`, { enabled });
-      message.success(`规则 ${sid} 已${enabled ? '启用' : '停用'}并即时生效`);
+      const r = await api.patch<{ ruleset_version?: number }>(`/api/v1/rules/${sid}`, { enabled });
+      const ver = r.ruleset_version ? `，规则集版本 v${r.ruleset_version}` : '';
+      message.success(`规则 ${sid} 已${enabled ? '启用' : '停用'}并即时生效${ver}`);
       qc.invalidateQueries({ queryKey: ['rules'] });
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
@@ -97,8 +81,9 @@ export default function Rules() {
         },
         mitre_technique: values.mitre_technique ?? '',
       };
-      const r = await api.post<{ sid: number }>('/api/v1/rules', body);
-      message.success(`规则 ${r.sid} 已创建并热加载生效（新攻击手法无需重启引擎）`);
+      const r = await api.post<{ sid: number; ruleset_version?: number }>('/api/v1/rules', body);
+      const ver = r.ruleset_version ? `，规则集版本 v${r.ruleset_version}` : '';
+      message.success(`规则 ${r.sid} 已创建并热加载生效${ver}（新攻击手法无需重启引擎）`);
       setCreateOpen(false);
       form.resetFields();
       qc.invalidateQueries({ queryKey: ['rules'] });
@@ -149,7 +134,7 @@ export default function Rules() {
       dataIndex: 'severity',
       width: 100,
       render: (v: number | null) =>
-        v ? <Tag color={v === 1 ? 'red' : v === 2 ? 'orange' : 'blue'}>{sevNames[v] ?? v}</Tag> : '-',
+        v ? <Tag color={sevMeta[v]?.tag}>{sevMeta[v]?.text ?? v}</Tag> : '-',
     },
     { title: '来源', dataIndex: 'source', width: 80, render: (v: string) => (v === 'custom' ? '自定义' : '内置') },
     {
@@ -288,7 +273,11 @@ export default function Rules() {
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="stage" label="攻击阶段" rules={[{ required: true }]}>
-                <Select options={Object.entries(stageNames).map(([value, label]) => ({ value, label }))} />
+                <Select
+                  options={Object.entries(stageNames)
+                    .filter(([value]) => value !== '未分类')
+                    .map(([value, label]) => ({ value, label }))}
+                />
               </Form.Item>
             </Col>
             <Col span={12}>

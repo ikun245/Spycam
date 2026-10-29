@@ -13,7 +13,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { sevMeta as sevNames, stageNames } from '../labels';
 
 interface OverviewResp {
   total_alerts: number;
@@ -28,27 +30,17 @@ interface OverviewResp {
   stage_distribution: { stage: string; cnt: number }[];
 }
 
-const stageNames: Record<string, string> = {
-  recon: '侦察探测',
-  bruteforce: '暴力破解',
-  exploit: '漏洞利用',
-  c2: '命令控制',
-  exfil: '数据外泄',
-  未分类: '未分类',
-};
-
-const sevNames: Record<number, { text: string; color: string }> = {
-  1: { text: '高危', color: '#cf1322' },
-  2: { text: '中危', color: '#d46b08' },
-  3: { text: '低危', color: '#2f54eb' },
-};
-
 export default function Overview() {
   const { data } = useQuery({
     queryKey: ['overview'],
     // 不传 since：离线回放的告警时间戳是 pcap 内原始时间，按墙钟过滤会永远为空
     queryFn: () => api.get<OverviewResp>('/api/v1/overview'),
     refetchInterval: 8000,
+  });
+  const engine = useQuery({
+    queryKey: ['engine'],
+    queryFn: () => api.get<{ agent?: { running: boolean } }>('/api/v1/engine/status'),
+    refetchInterval: 15000,
   });
 
   const sevData = (data?.severity_distribution ?? []).map((d) => ({
@@ -86,7 +78,11 @@ export default function Overview() {
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="引擎状态" value="运行中" valueStyle={{ color: '#3f8600' }} />
+            <Statistic
+              title="引擎状态"
+              value={engine.data ? (engine.data.agent?.running ? '运行中' : '不可达') : engine.isError ? '未知' : '-'}
+              valueStyle={{ color: engine.data?.agent?.running ? '#3f8600' : '#cf1322' }}
+            />
           </Card>
         </Col>
       </Row>
@@ -145,17 +141,19 @@ export default function Overview() {
 
       <Row gutter={16} style={{ marginTop: 16 }}>
         <Col span={8}>
-          <Card title="攻击来源 TOP10" size="small">
+          <Card title="攻击来源前 10（点击查看告警）" size="small">
             {(data?.top_src_ips ?? []).map((r) => (
               <div key={r.src_ip} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <code>{r.src_ip}</code>
+                <Link to={`/alerts?${new URLSearchParams({ src_ip: r.src_ip })}`}>
+                  <code>{r.src_ip}</code>
+                </Link>
                 <Tag>{r.cnt} 次</Tag>
               </div>
             ))}
           </Card>
         </Col>
         <Col span={8}>
-          <Card title="受攻击目标端口 TOP10" size="small">
+          <Card title="受攻击目标端口前 10" size="small">
             {(data?.top_dest_ports ?? []).map((r) => (
               <div key={r.dest_port} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
                 <span>{r.dest_port} 端口</span>
@@ -182,12 +180,15 @@ export default function Overview() {
         </Col>
       </Row>
 
-      <Card title="命中规则 TOP10" size="small" style={{ marginTop: 16 }}>
+      <Card title="命中规则前 10（点击查看告警）" size="small" style={{ marginTop: 16 }}>
         {(data?.top_signatures ?? []).map((r) => (
           <div key={r.sid} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Link
+              to={`/alerts?${new URLSearchParams({ sid: String(r.sid) })}`}
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
               {r.signature || `规则 ${r.sid}`}
-            </span>
+            </Link>
             <Tag>{r.cnt} 次</Tag>
           </div>
         ))}

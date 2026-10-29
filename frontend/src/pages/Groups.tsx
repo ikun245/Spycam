@@ -2,6 +2,7 @@ import { App, Card, Empty, Segmented, Table, Tag } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client';
+import { stageColor, stageText, triageMeta, triageText } from '../labels';
 
 interface GroupItem {
   id: number;
@@ -18,16 +19,7 @@ interface GroupItem {
   stage: string | null;
 }
 
-const statusTag = (s: string) => {
-  const map: Record<string, { color: string; text: string }> = {
-    new: { color: 'orange', text: '新' },
-    confirmed: { color: 'red', text: '已确认' },
-    false_positive: { color: 'default', text: '误报' },
-    ignored: { color: 'default', text: '忽略' },
-  };
-  const v = map[s] ?? { color: 'default', text: s };
-  return <Tag color={v.color}>{v.text}</Tag>;
-};
+const statusTag = (s: string) => <Tag color={triageMeta[s]?.color ?? 'default'}>{triageText(s)}</Tag>;
 
 // 聚合视图（S1）：同签名+同五元组合并，显示命中计数；处置（S2）直接在行上完成
 export default function Groups() {
@@ -47,7 +39,7 @@ export default function Groups() {
   const triage = async (id: number, status: string) => {
     try {
       await api.patch(`/api/v1/alert-groups/${id}/status`, { status });
-      message.success(`已标记为 ${status}`);
+      message.success(`已标记为「${triageText(status)}」`);
       qc.invalidateQueries({ queryKey: ['groups'] });
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
@@ -60,7 +52,7 @@ export default function Groups() {
       title: '阶段',
       dataIndex: 'stage',
       width: 100,
-      render: (v: string | null) => (v ? <Tag>{v}</Tag> : '-'),
+      render: (v: string | null) => (v ? <Tag color={stageColor[v]}>{stageText(v)}</Tag> : '-'),
     },
     {
       title: '五元组',
@@ -117,9 +109,10 @@ export default function Groups() {
           onChange={(v) => setStatusFilter(v as string)}
           options={[
             { label: '全部', value: 'all' },
-            { label: '新', value: 'new' },
+            { label: '待处置', value: 'new' },
             { label: '已确认', value: 'confirmed' },
             { label: '误报', value: 'false_positive' },
+            { label: '已忽略', value: 'ignored' },
           ]}
         />
       }

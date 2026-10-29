@@ -2,6 +2,7 @@ import { Card, Descriptions, Spin, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { sevMeta, sevText, stageColor, stageText } from '../labels';
 
 interface AlertDetail {
   alert: {
@@ -59,14 +60,16 @@ export default function AlertDetail() {
         <Descriptions.Item label="签名" span={2}>
           {a.signature ?? '-'}
         </Descriptions.Item>
-        <Descriptions.Item label="severity">
-          <Tag color={a.severity === 1 ? 'red' : a.severity === 2 ? 'orange' : 'blue'}>
-            {a.severity ?? '-'}
-          </Tag>
+        <Descriptions.Item label="威胁等级">
+          <Tag color={a.severity ? sevMeta[a.severity]?.tag : undefined}>{sevText(a.severity)}</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="分类">{a.category ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="阶段">
-          {data.rule_stage ? <Tag>{data.rule_stage}</Tag> : '-'}
+        <Descriptions.Item label="攻击阶段">
+          {data.rule_stage ? (
+            <Tag color={stageColor[data.rule_stage]}>{stageText(data.rule_stage)}</Tag>
+          ) : (
+            '-'
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="ATT&CK">
           {data.rule_mitre_technique ?? '-'}

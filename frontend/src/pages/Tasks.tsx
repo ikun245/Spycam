@@ -1,6 +1,7 @@
 import { Card, Empty, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { taskStatusMeta } from '../labels';
 
 interface TaskItem {
   id: string;
@@ -14,13 +15,8 @@ interface TaskItem {
 }
 
 const statusTag = (s: string) => {
-  const map: Record<string, { color: string }> = {
-    queued: { color: 'default' },
-    running: { color: 'processing' },
-    done: { color: 'success' },
-    failed: { color: 'error' },
-  };
-  return <Tag color={map[s]?.color ?? 'default'}>{s}</Tag>;
+  const m = taskStatusMeta[s];
+  return <Tag color={m?.color ?? 'default'}>{m?.text ?? s}</Tag>;
 };
 
 export default function Tasks() {
@@ -31,7 +27,7 @@ export default function Tasks() {
   });
 
   const columns = [
-    { title: 'pcap', dataIndex: 'original_name', ellipsis: true },
+    { title: 'pcap 文件', dataIndex: 'original_name', ellipsis: true },
     {
       title: '状态',
       dataIndex: 'status',
