@@ -128,7 +128,7 @@ func (a *AgentServer) handleReplay(w http.ResponseWriter, r *http.Request) {
 
 func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	// suricata -T 校验当前规则目录（参数数组，绝不 sh -c；M7）
+	// 先校验规则（参数数组，绝不 sh -c；M7）
 	cmd := exec.CommandContext(r.Context(), a.suriBin, "-T",
 		"-c", "/etc/suricata/suricata.yaml",
 		"-l", "/var/log/suricata")
@@ -140,7 +140,22 @@ func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"reloaded": true, "elapsed_ms": time.Since(start).Milliseconds()})
+	// 热重载：非阻塞 reload，引擎平滑加载新规则集
+	sock := NewSuricataCmd(a.socketPat, 30*time.Second)
+	if _, err := sock.Do(r.Context(), "ruleset-reload-nonblocking", nil); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":      "ruleset reload failed",
+			"detail":     err.Error(),
+			"validated":  true,
+			"elapsed_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"validated":  true,
+		"reloaded":   true,
+		"elapsed_ms": time.Since(start).Milliseconds(),
+	})
 }
 
 func (a *AgentServer) handleValidate(w http.ResponseWriter, r *http.Request) {

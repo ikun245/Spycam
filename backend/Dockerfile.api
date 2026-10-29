@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/api ./cmd/api
 FROM alpine:3.20
 RUN adduser -D -u 10001 app && apk add --no-cache ca-certificates curl
 # 预创建挂载点并赋属主：命名卷首挂时会把该目录属主带进去（app uid 10001 可写）
-RUN mkdir -p /data/pcaps && chown -R app:app /data
+RUN mkdir -p /data/pcaps /rules-active && chown -R app:app /data /rules-active
 USER app
 WORKDIR /app
 COPY --from=build /out/api /app/api

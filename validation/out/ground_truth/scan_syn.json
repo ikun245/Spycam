@@ -1,0 +1,27 @@
+{
+  "pcap": "scan_syn.pcap",
+  "scenario": "syn_port_scan",
+  "benign": false,
+  "description": "203.0.113.66 对 10.0.0.5 1-200 端口 SYN 扫描（100 包）",
+  "expected_alerts": [
+    {
+      "sid": 1000001,
+      "msg": "SPYCAM SYN port scan to low ports",
+      "src_ip": "203.0.113.66",
+      "dst_ip": "10.0.0.5",
+      "dst_port_range": [
+        1,
+        200
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-01T00:00:06Z"
+      },
+      "min_count": 1
+    }
+  ],
+  "known_limitations": [
+    "慢扫（间隔 > 10s）不会命中 detection_filter 窗口"
+  ]
+}

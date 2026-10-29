@@ -1,0 +1,8 @@
+{
+  "pcap": "benign_mix.pcap",
+  "scenario": "benign_mixed_traffic",
+  "benign": true,
+  "description": "正常 DNS(80)+HTTP(60)+TCP SYN(20)，无攻击特征",
+  "expected_alerts": [],
+  "known_limitations": []
+}

@@ -11,6 +11,91 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRule = `-- name: GetRule :one
+SELECT sid, raw, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source
+FROM rules WHERE sid = $1
+`
+
+type GetRuleRow struct {
+	Sid            int64       `json:"sid"`
+	Raw            string      `json:"raw"`
+	Msg            string      `json:"msg"`
+	Enabled        bool        `json:"enabled"`
+	Classtype      pgtype.Text `json:"classtype"`
+	Severity       pgtype.Int4 `json:"severity"`
+	Stage          pgtype.Text `json:"stage"`
+	MitreTactic    pgtype.Text `json:"mitre_tactic"`
+	MitreTechnique pgtype.Text `json:"mitre_technique"`
+	Source         string      `json:"source"`
+}
+
+func (q *Queries) GetRule(ctx context.Context, sid int64) (GetRuleRow, error) {
+	row := q.db.QueryRow(ctx, getRule, sid)
+	var i GetRuleRow
+	err := row.Scan(
+		&i.Sid,
+		&i.Raw,
+		&i.Msg,
+		&i.Enabled,
+		&i.Classtype,
+		&i.Severity,
+		&i.Stage,
+		&i.MitreTactic,
+		&i.MitreTechnique,
+		&i.Source,
+	)
+	return i, err
+}
+
+const listEnabledRules = `-- name: ListEnabledRules :many
+SELECT sid, raw, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source
+FROM rules WHERE enabled = TRUE ORDER BY sid
+`
+
+type ListEnabledRulesRow struct {
+	Sid            int64       `json:"sid"`
+	Raw            string      `json:"raw"`
+	Msg            string      `json:"msg"`
+	Enabled        bool        `json:"enabled"`
+	Classtype      pgtype.Text `json:"classtype"`
+	Severity       pgtype.Int4 `json:"severity"`
+	Stage          pgtype.Text `json:"stage"`
+	MitreTactic    pgtype.Text `json:"mitre_tactic"`
+	MitreTechnique pgtype.Text `json:"mitre_technique"`
+	Source         string      `json:"source"`
+}
+
+func (q *Queries) ListEnabledRules(ctx context.Context) ([]ListEnabledRulesRow, error) {
+	rows, err := q.db.Query(ctx, listEnabledRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEnabledRulesRow
+	for rows.Next() {
+		var i ListEnabledRulesRow
+		if err := rows.Scan(
+			&i.Sid,
+			&i.Raw,
+			&i.Msg,
+			&i.Enabled,
+			&i.Classtype,
+			&i.Severity,
+			&i.Stage,
+			&i.MitreTactic,
+			&i.MitreTechnique,
+			&i.Source,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRules = `-- name: ListRules :many
 SELECT sid, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source
 FROM rules ORDER BY sid
@@ -56,4 +141,18 @@ func (q *Queries) ListRules(ctx context.Context) ([]ListRulesRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRuleEnabled = `-- name: SetRuleEnabled :exec
+UPDATE rules SET enabled = $2, updated_at = now() WHERE sid = $1
+`
+
+type SetRuleEnabledParams struct {
+	Sid     int64 `json:"sid"`
+	Enabled bool  `json:"enabled"`
+}
+
+func (q *Queries) SetRuleEnabled(ctx context.Context, arg SetRuleEnabledParams) error {
+	_, err := q.db.Exec(ctx, setRuleEnabled, arg.Sid, arg.Enabled)
+	return err
 }

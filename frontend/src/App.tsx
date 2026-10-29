@@ -1,8 +1,9 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { Layout, Menu, Typography } from 'antd';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Alerts from './pages/Alerts';
+import AlertDetail from './pages/AlertDetail';
 import Rules from './pages/Rules';
 import DataPage from './pages/Data';
 
@@ -16,6 +17,7 @@ const menuItems = [
 ];
 
 export default function App() {
+  const nav = useNavigate();
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -33,15 +35,15 @@ export default function App() {
                 <Menu
                   theme="dark"
                   mode="inline"
-                  defaultSelectedKeys={['/']}
                   items={menuItems}
-                  onClick={({ key }) => (window.location.hash = key)}
+                  onClick={({ key }) => nav(key)}
                 />
               </Sider>
               <Content style={{ padding: 16 }}>
                 <Routes>
                   <Route path="/" element={<Overview />} />
                   <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/alerts/:id" element={<AlertDetail />} />
                   <Route path="/data" element={<DataPage />} />
                   <Route path="/rules" element={<Rules />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

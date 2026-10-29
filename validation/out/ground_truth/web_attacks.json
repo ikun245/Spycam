@@ -1,0 +1,41 @@
+{
+  "pcap": "web_attacks.pcap",
+  "scenario": "web_sqli_xss",
+  "benign": false,
+  "description": "SQLi UNION + XSS 完整 TCP 会话 HTTP GET（60 会话）",
+  "expected_alerts": [
+    {
+      "sid": 1000003,
+      "msg": "SPYCAM SQLi UNION SELECT in URI or body",
+      "src_ip": "203.0.113.66",
+      "dst_ip": "10.0.0.5",
+      "dst_port_range": [
+        80,
+        80
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-01T00:01:00Z"
+      },
+      "min_count": 1
+    },
+    {
+      "sid": 1000004,
+      "msg": "SPYCAM XSS script tag with event handler",
+      "src_ip": "203.0.113.66",
+      "dst_ip": "10.0.0.5",
+      "dst_port_range": [
+        80,
+        80
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-01T00:01:00Z"
+      },
+      "min_count": 1
+    }
+  ],
+  "known_limitations": []
+}

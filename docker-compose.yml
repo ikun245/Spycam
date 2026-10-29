@@ -111,8 +111,10 @@ services:
       API_BASE_URL: http://api:8081
       VALIDATOR_USER: ${SEED_ADMIN_USER:-admin}
       VALIDATOR_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
+      VALIDATION_OUT: /data/out
     volumes:
       - pcaps:/data/pcaps
+      - ./validation/out:/data/out
     depends_on:
       - api
     networks: [internal]

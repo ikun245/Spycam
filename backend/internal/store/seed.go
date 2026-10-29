@@ -7,13 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	sidRe = regexp.MustCompile(`\bsid:(\d+)\b`)
-	msgRe = regexp.MustCompile(`\bmsg:"([^"]*)"\b`)
+	sidRe    = regexp.MustCompile(`\bsid:(\d+)\b`)
+	msgRe    = regexp.MustCompile(`\bmsg:\s*"([^"]*)"`)
+	classRe  = regexp.MustCompile(`\bclasstype:\s*([\w-]+)`)
+	sevRe    = regexp.MustCompile(`\bseverity:\s*(\d+)`)
+	stageRe  = regexp.MustCompile(`\bstage\s+(\w+)`)
+	tacticRe = regexp.MustCompile(`\bmitre_tactic\s+([^,;]+)`)
+	techRe   = regexp.MustCompile(`\bmitre_technique\s+([^,;]+)`)
 )
 
 // SeedRules 将种子规则目录下的 *.rules 导入 rules 表（幂等，ON CONFLICT 跳过）。
@@ -54,15 +61,27 @@ func importRuleLines(ctx context.Context, pool *pgxpool.Pool, content string) (i
 		if _, err := fmt.Sscanf(m[1], "%d", &sid); err != nil {
 			return count, fmt.Errorf("bad sid %q: %w", m[1], err)
 		}
-		msg := ""
-		if mm := msgRe.FindStringSubmatch(line); mm != nil {
-			msg = mm[1]
+		msg := firstMatch(msgRe, line)
+		classtype := firstMatch(classRe, line)
+		severity := pgtype.Int4{}
+		if sm := sevRe.FindStringSubmatch(line); sm != nil {
+			var sv int
+			if _, err := fmt.Sscanf(sm[1], "%d", &sv); err == nil {
+				severity = pgtype.Int4{Int32: int32(sv), Valid: true}
+			}
 		}
+		stage := firstMatch(stageRe, line)
+		tactic := strings.TrimSpace(firstMatch(tacticRe, line))
+		technique := strings.TrimSpace(firstMatch(techRe, line))
+
 		tag, err := pool.Exec(ctx,
-			`INSERT INTO rules (sid, raw, msg, enabled, source)
-			 VALUES ($1, $2, $3, TRUE, 'seed')
-			 ON CONFLICT (sid) DO NOTHING`,
-			sid, line, msg)
+			`INSERT INTO rules (sid, raw, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source)
+			 VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8, 'seed')
+			 ON CONFLICT (sid) DO UPDATE SET
+			   raw = EXCLUDED.raw, msg = EXCLUDED.msg, classtype = EXCLUDED.classtype,
+			   severity = EXCLUDED.severity, stage = EXCLUDED.stage,
+			   mitre_tactic = EXCLUDED.mitre_tactic, mitre_technique = EXCLUDED.mitre_technique`,
+			sid, line, msg, strPtr(classtype), severity, strPtr(stage), strPtr(tactic), strPtr(technique))
 		if err != nil {
 			return count, fmt.Errorf("insert rule sid=%d: %w", sid, err)
 		}
@@ -71,6 +90,20 @@ func importRuleLines(ctx context.Context, pool *pgxpool.Pool, content string) (i
 		}
 	}
 	return count, nil
+}
+
+func firstMatch(re *regexp.Regexp, s string) string {
+	if m := re.FindStringSubmatch(s); m != nil && len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func strPtr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func splitLines(s string) []string {

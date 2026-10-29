@@ -49,7 +49,9 @@ export default function Alerts() {
       title: '签名',
       dataIndex: 'signature',
       ellipsis: true,
-      render: (v: string, row: AlertItem) => v || `sid ${row.sid}`,
+      render: (v: string, row: AlertItem) => (
+        <a onClick={() => window.location.assign(`/alerts/${row.id}`)}>{v || `sid ${row.sid}`}</a>
+      ),
     },
     {
       title: 'severity',

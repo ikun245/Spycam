@@ -1,18 +1,218 @@
-"""数据自验入口（P2 实现；骨架期输出占位说明）。
+"""M5 自动评测：上传全部场景 pcap → 回放 → 按任务取原始告警 → 对照 ground truth →
+输出 report.json / report.md。
 
-完整流程（架构设计 §8）：生成场景 pcap → 上传回放 → 经 API 取原始告警 →
-对照 ground truth → 输出 report.json + report.md。
-评测程序只走公开 API，不直接读数据库或 Suricata 日志。
+判定口径（需求梳理 §5.3）：
+- TP：存在至少一条告警 sid 匹配、五元组匹配（目的端口在范围内）、时间落在期望窗内
+- FN：某条期望完全无命中
+- FP：负样本 pcap 的任意告警；或攻击 pcap 中不匹配任何期望的告警
 """
+import json
 import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+
+BASE = os.environ.get("API_BASE_URL", "http://api:8081")
+USER = os.environ.get("VALIDATOR_USER", "admin")
+PASSWORD = os.environ.get("VALIDATOR_PASSWORD", "")
+OUT = Path(os.environ.get("VALIDATION_OUT", "/work/out"))
 
 
-def main() -> None:
-    api = os.environ.get("API_BASE_URL", "http://api:8081")
-    print(f"[validator] skeleton placeholder; API_BASE_URL={api}")
-    print("[validator] scenarios / ground truth / TP-FP-FN evaluation come in P2")
-    print("[validator] see docs/需求梳理.md §5 for the judging criteria")
+def iso_to_dt(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def parse_eve_ts(s):
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f%z")
+
+
+def login(session):
+    r = session.post(
+        f"{BASE}/api/v1/auth/login",
+        json={"username": USER, "password": PASSWORD},
+        timeout=10,
+    )
+    r.raise_for_status()
+
+
+def wait_task(session, task_id, timeout=120):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        t = session.get(f"{BASE}/api/v1/replay-tasks/{task_id}", timeout=10).json()
+        if t["status"] in ("done", "failed"):
+            return t
+        time.sleep(2)
+    return {"status": "timeout"}
+
+
+def fetch_alerts(session, task_id):
+    items = []
+    limit, offset = 200, 0
+    while True:
+        r = session.get(
+            f"{BASE}/api/v1/alerts",
+            params={"task_id": task_id, "limit": limit, "offset": offset},
+            timeout=10,
+        ).json()
+        items.extend(r["items"])
+        if len(items) >= r["total"] or not r["items"]:
+            break
+        offset += limit
+    return items
+
+
+def evaluate_expectation(exp, alerts):
+    """返回命中的告警 id 列表。"""
+    window = exp.get("window", {})
+    ws = iso_to_dt(window["start"]) if window.get("start") else None
+    we = iso_to_dt(window["end"]) if window.get("end") else None
+    lo, hi = exp.get("dst_port_range", [0, 65535])
+    matched = []
+    for a in alerts:
+        if a["sid"] != exp["sid"]:
+            continue
+        if a["src_ip"] != exp["src_ip"] or a["dest_ip"] != exp["dst_ip"]:
+            continue
+        dp = a.get("dest_port")
+        if dp is None or not (lo <= dp <= hi):
+            continue
+        if ws or we:
+            try:
+                ts = parse_eve_ts(a["ts"])
+            except Exception:
+                continue
+            if ws and ts < ws:
+                continue
+            if we and ts > we:
+                continue
+        matched.append(a["id"])
+    return matched
+
+
+def evaluate_one(session, gt):
+    pcap_path = OUT / gt["pcap"]
+    with pcap_path.open("rb") as fh:
+        r = session.post(
+            f"{BASE}/api/v1/pcaps",
+            files={"file": (gt["pcap"], fh, "application/octet-stream")},
+            data={"name": gt["pcap"], "sample_type": gt["scenario"]},
+            timeout=60,
+        )
+    r.raise_for_status()
+    pcap_id = r.json()["id"]
+    t = session.post(
+        f"{BASE}/api/v1/replay-tasks", json={"pcap_id": pcap_id}, timeout=10
+    ).json()
+    final = wait_task(session, t["id"])
+    alerts = fetch_alerts(session, t["id"]) if final["status"] == "done" else []
+
+    matched_ids = set()
+    per_exp = []
+    for exp in gt["expected_alerts"]:
+        ids = evaluate_expectation(exp, alerts)
+        per_exp.append(
+            {
+                "sid": exp["sid"],
+                "matched": len(ids),
+                "min_count": exp.get("min_count", 1),
+            }
+        )
+        matched_ids.update(ids)
+
+    exp_sids = {exp["sid"] for exp in gt["expected_alerts"]}
+    fps = [a for a in alerts if a["id"] not in matched_ids and a["sid"] not in exp_sids]
+
+    if gt["benign"]:
+        tp, fn = 0, 0
+        fp = len(alerts)
+        fps = alerts
+    else:
+        tp = sum(1 for e in per_exp if e["matched"] >= e["min_count"])
+        fn = len(per_exp) - tp
+        fp = len(fps)
+
+    precision = tp / (tp + fp) if (tp + fp) else (1.0 if tp + fn == 0 else 0.0)
+    recall = tp / (tp + fn) if (tp + fn) else 1.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    return {
+        "scenario": gt["scenario"],
+        "pcap": gt["pcap"],
+        "benign": gt["benign"],
+        "task_id": t["id"],
+        "task_status": final["status"],
+        "alert_count": len(alerts),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "expectations": per_exp,
+        "fp_samples": [
+            {"sid": a["sid"], "src_ip": a["src_ip"], "dest_port": a.get("dest_port")}
+            for a in fps[:10]
+        ],
+    }
+
+
+def main():
+    session = requests.Session()
+    login(session)
+
+    gt_files = sorted((OUT / "ground_truth").glob("*.json"))
+    scenarios = []
+    for gt_file in gt_files:
+        gt = json.loads(gt_file.read_text(encoding="utf-8"))
+        s = evaluate_one(session, gt)
+        scenarios.append(s)
+        print(f"[validator] {s['scenario']}: alerts={s['alert_count']} "
+              f"TP={s['tp']} FP={s['fp']} FN={s['fn']}")
+
+    tp_total = sum(s["tp"] for s in scenarios)
+    fp_total = sum(s["fp"] for s in scenarios)
+    fn_total = sum(s["fn"] for s in scenarios)
+    g_precision = tp_total / (tp_total + fp_total) if (tp_total + fp_total) else 0.0
+    g_recall = tp_total / (tp_total + fn_total) if (tp_total + fn_total) else 1.0
+
+    report = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
+        "overall": {
+            "tp": tp_total,
+            "fp": fp_total,
+            "fn": fn_total,
+            "precision": round(g_precision, 4),
+            "recall": round(g_recall, 4),
+        },
+        "scenarios": scenarios,
+    }
+    (OUT / "report.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    lines = [
+        "# Spycam 数据自验报告",
+        "",
+        f"生成时间：{report['generated_at']}",
+        "",
+        f"总体：TP={tp_total} FP={fp_total} FN={fn_total} "
+        f"Precision={report['overall']['precision']} Recall={report['overall']['recall']}",
+        "",
+        "| 场景 | pcap | 告警数 | TP | FP | FN | P | R | F1 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for s in scenarios:
+        lines.append(
+            f"| {s['scenario']} | {s['pcap']} | {s['alert_count']} | {s['tp']} | "
+            f"{s['fp']} | {s['fn']} | {s['precision']} | {s['recall']} | {s['f1']} |"
+        )
+    (OUT / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
