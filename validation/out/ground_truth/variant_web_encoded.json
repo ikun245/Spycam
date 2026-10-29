@@ -1,0 +1,10 @@
+{
+  "pcap": "variant_web_encoded.pcap",
+  "scenario": "variant_web_encoded",
+  "benign": false,
+  "variant_of": "web_sqli_xss",
+  "prediction": "hit",
+  "prediction_reason": "1000003 用 content nocase；1000004 用 pcre 覆盖 %3C 编码，编码与大小写变化都应命中",
+  "expected_alerts": [],
+  "known_limitations": []
+}

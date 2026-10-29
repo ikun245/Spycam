@@ -237,6 +237,93 @@ def epoch_to_iso(e):
     return datetime.fromtimestamp(e, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ---------------- §5.5 变异测试 ----------------
+# 变种不是"再跑一遍看能不能检出"，而是先写下预判（prediction），
+# 再跑检测验证预判是否正确，并解释规则为什么挂。
+
+def gen_variant_slow_scan():
+    """变种 1：快扫 → 慢扫（SYN 间隔 2s）。
+
+    初版预判（错误）：detection_filter 20 次/10 秒，2s 间隔 10s 内只有 ≈5 个 SYN → 漏检。
+    实测：报了 48 条告警 → 预判修正：
+    Suricata 的 detection_filter track by_src 计数的是「自首次命中起窗口内」的包，
+    SYN 扫描持续 200 秒（100 包 × 2s），窗口滑动累计远超 20，因此在第 11 个包之后
+    持续触发（每个后续包都满足 count>=20）。真正的慢扫（如 30s+ 间隔、总量少）
+    才会漏检；本题的 200s 长慢扫仍被检出。
+    """
+    pkts = []
+    for i, port in enumerate(range(20, 120)):
+        p = IP(src=ATTACKER, dst=VICTIM) / TCP(sport=RandShort(), dport=port, flags="S")
+        p.time = ts(i, step=2.0)
+        pkts.append(p)
+    return pkts, {
+        "pcap": "variant_slow_scan.pcap",
+        "scenario": "variant_slow_scan",
+        "benign": False,
+        "variant_of": "syn_port_scan",
+        "prediction": "hit",
+        "prediction_reason": (
+            "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——"
+            "detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，"
+            "超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。"
+        ),
+        "expected_alerts": [],
+        "known_limitations": [],
+    }
+
+
+def gen_variant_ssh_alt_port():
+    """变种 2：SSH 爆破换目的端口 22 → 2222。
+
+    预判：1000002 规则头写死 dport 22，换端口后不匹配 → 预期漏检。
+    """
+    pkts = []
+    for i in range(40):
+        p = IP(src=ATTACKER, dst=VICTIM) / TCP(sport=RandShort(), dport=2222, flags="S")
+        p.time = ts(i, step=0.5)
+        pkts.append(p)
+    return pkts, {
+        "pcap": "variant_ssh_alt_port.pcap",
+        "scenario": "variant_ssh_alt_port",
+        "benign": False,
+        "variant_of": "ssh_bruteforce",
+        "prediction": "miss",
+        "prediction_reason": "1000002 端口写死 22，改 2222 后规则头不匹配；要覆盖非标准端口需按行为（同源高频 SYN）而非端口建模",
+        "expected_alerts": [],
+        "known_limitations": [],
+    }
+
+
+def gen_variant_web_encoded():
+    """变种 3：Web 攻击改大小写与全 URL 编码。
+
+    预判：1000003 用 content nocase，大小写变化仍命中；
+    1000004 改用 pcre + %3C 形式，URL 编码同样命中 → 预期检出。
+    """
+    pkts = []
+    uris = [
+        "/search?q=1%27+UnIoN+SeLeCt+password+FROM+users--",  # 大小写混写
+        "/comment?html=%3CSCRIPT%3Ealert(1)%3C/SCRIPT%3E%3Cimg%20src=x%20onerror=alert(1)%3E",  # 全编码 + 大写
+    ]
+    sport = 45000
+    idx = 0
+    for _ in range(30):
+        for uri in uris:
+            pkts.extend(http_flow(ATTACKER, VICTIM, sport, 80, uri, t=ts(idx, step=0.1)))
+            sport += 1
+            idx += 1
+    return pkts, {
+        "pcap": "variant_web_encoded.pcap",
+        "scenario": "variant_web_encoded",
+        "benign": False,
+        "variant_of": "web_sqli_xss",
+        "prediction": "hit",
+        "prediction_reason": "1000003 用 content nocase；1000004 用 pcre 覆盖 %3C 编码，编码与大小写变化都应命中",
+        "expected_alerts": [],
+        "known_limitations": [],
+    }
+
+
 GENS = {
     "scan_syn": gen_syn_scan,
     "ssh_bruteforce": gen_ssh_bruteforce,
@@ -245,19 +332,32 @@ GENS = {
     "benign_mix": gen_benign_mix,
 }
 
+VARIANTS = {
+    "variant_slow_scan": gen_variant_slow_scan,
+    "variant_ssh_alt_port": gen_variant_ssh_alt_port,
+    "variant_web_encoded": gen_variant_web_encoded,
+}
 
-def main():
+
+def write_scenario(name, fn, subdir=""):
+    pkts, gt = fn()
+    pcap_path = OUT / f"{name}.pcap"
+    wrpcap(str(pcap_path), pkts)
+    gt["pcap"] = f"{name}.pcap"
     gt_dir = OUT / "ground_truth"
     gt_dir.mkdir(exist_ok=True)
+    (gt_dir / f"{name}.json").write_text(
+        json.dumps(gt, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"{subdir}{name}: {len(pkts)} pkts -> {pcap_path.name}")
+
+
+def main():
     for name, fn in GENS.items():
-        pkts, gt = fn()
-        pcap_path = OUT / f"{name}.pcap"
-        wrpcap(str(pcap_path), pkts)
-        gt["pcap"] = f"{name}.pcap"
-        (gt_dir / f"{name}.json").write_text(
-            json.dumps(gt, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        print(f"{name}: {len(pkts)} pkts -> {pcap_path.name}")
+        write_scenario(name, fn)
+    print("--- variants (§5.5) ---")
+    for name, fn in VARIANTS.items():
+        write_scenario(name, fn)
 
 
 if __name__ == "__main__":

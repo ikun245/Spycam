@@ -4,16 +4,20 @@ import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Alerts from './pages/Alerts';
 import AlertDetail from './pages/AlertDetail';
+import Groups from './pages/Groups';
 import Rules from './pages/Rules';
 import DataPage from './pages/Data';
+import Validation from './pages/Validation';
 
 const { Header, Sider, Content } = Layout;
 
 const menuItems = [
   { key: '/', label: '总览' },
   { key: '/alerts', label: '告警列表' },
+  { key: '/groups', label: '聚合处置' },
   { key: '/data', label: '数据与回放' },
   { key: '/rules', label: '规则管理' },
+  { key: '/validation', label: '自验报告' },
 ];
 
 export default function App() {
@@ -44,8 +48,10 @@ export default function App() {
                   <Route path="/" element={<Overview />} />
                   <Route path="/alerts" element={<Alerts />} />
                   <Route path="/alerts/:id" element={<AlertDetail />} />
+                  <Route path="/groups" element={<Groups />} />
                   <Route path="/data" element={<DataPage />} />
                   <Route path="/rules" element={<Rules />} />
+                  <Route path="/validation" element={<Validation />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Content>

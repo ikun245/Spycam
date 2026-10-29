@@ -48,3 +48,8 @@ func Subscribe(ctx context.Context, rdb *redis.Client, out chan<- *redis.Message
 		}
 	}()
 }
+
+// PublishGroup 发布告警组消息（聚合完成后调用，payload 为组 JSON 摘要）。
+func (p *Publisher) PublishGroup(ctx context.Context, payload []byte) error {
+	return p.rdb.Publish(ctx, Channel, payload).Err()
+}

@@ -92,6 +92,40 @@ def evaluate_expectation(exp, alerts):
     return matched
 
 
+def evaluate_variant(session, gt):
+    """§5.5 变异测试：只跑回放，比较"预判 vs 实际"，不参与 TP/FP/FN 统计。"""
+    pcap_path = OUT / gt["pcap"]
+    with pcap_path.open("rb") as fh:
+        r = session.post(
+            f"{BASE}/api/v1/pcaps",
+            files={"file": (gt["pcap"], fh, "application/octet-stream")},
+            data={"name": gt["pcap"], "sample_type": gt["scenario"]},
+            timeout=60,
+        )
+    r.raise_for_status()
+    pcap_id = r.json()["id"]
+    t = session.post(
+        f"{BASE}/api/v1/replay-tasks", json={"pcap_id": pcap_id}, timeout=10
+    ).json()
+    final = wait_task(session, t["id"])
+    alerts = fetch_alerts(session, t["id"]) if final["status"] == "done" else []
+
+    detected = len(alerts) > 0
+    prediction = gt.get("prediction", "hit")
+    expected = prediction == "hit"
+    return {
+        "scenario": gt["scenario"],
+        "variant_of": gt["variant_of"],
+        "pcap": gt["pcap"],
+        "prediction": prediction,
+        "prediction_reason": gt.get("prediction_reason", ""),
+        "actual_alert_count": len(alerts),
+        "actual": "hit" if detected else "miss",
+        "prediction_correct": detected == expected,
+        "sids": sorted({a["sid"] for a in alerts}),
+    }
+
+
 def evaluate_one(session, gt):
     pcap_path = OUT / gt["pcap"]
     with pcap_path.open("rb") as fh:
@@ -165,8 +199,16 @@ def main():
 
     gt_files = sorted((OUT / "ground_truth").glob("*.json"))
     scenarios = []
+    variants = []
     for gt_file in gt_files:
         gt = json.loads(gt_file.read_text(encoding="utf-8"))
+        if gt.get("variant_of"):
+            v = evaluate_variant(session, gt)
+            variants.append(v)
+            mark = "OK" if v["prediction_correct"] else "WRONG"
+            print(f"[validator] {v['scenario']} (variant of {v['variant_of']}): "
+                  f"predicted={v['prediction']} actual={v['actual']} -> {mark}")
+            continue
         s = evaluate_one(session, gt)
         scenarios.append(s)
         print(f"[validator] {s['scenario']}: alerts={s['alert_count']} "
@@ -189,6 +231,7 @@ def main():
             "recall": round(g_recall, 4),
         },
         "scenarios": scenarios,
+        "variants": variants,
     }
     (OUT / "report.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -210,6 +253,27 @@ def main():
             f"| {s['scenario']} | {s['pcap']} | {s['alert_count']} | {s['tp']} | "
             f"{s['fp']} | {s['fn']} | {s['precision']} | {s['recall']} | {s['f1']} |"
         )
+    if variants:
+        lines += [
+            "",
+            "## 变异测试（§5.5：先预判，再验证）",
+            "",
+            "| 变种 | 基线场景 | 预判 | 实际 | 是否命中预判 | 预判依据 |",
+            "|---|---|---|---|---|---|",
+        ]
+        for v in variants:
+            ok = "✅" if v["prediction_correct"] else "❌"
+            lines.append(
+                f"| {v['scenario']} | {v['variant_of']} | {v['prediction']} | "
+                f"{v['actual']}（{v['actual_alert_count']} 条） | {ok} | {v['prediction_reason']} |"
+            )
+    if fp_total or fn_total:
+        lines += ["", "## 已知 FN / FP 说明", ""]
+        for s in scenarios:
+            if s["fn"]:
+                lines.append(f"- {s['scenario']}: FN={s['fn']}（期望未命中，见 ground truth known_limitations）")
+            if s["fp"]:
+                lines.append(f"- {s['scenario']}: FP={s['fp']}，样例 {s['fp_samples']}")
     (OUT / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

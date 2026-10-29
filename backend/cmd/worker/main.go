@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"spycam/backend/internal/aggregate"
 	"spycam/backend/internal/config"
 	"spycam/backend/internal/engine"
 	"spycam/backend/internal/ingest"
@@ -89,11 +90,11 @@ func main() {
 		if len(taskID) < 2 {
 			continue
 		}
-		runTask(ctx, queries, agent, pool, eveRoot, taskID[1])
+		runTask(ctx, queries, agent, pool, eveRoot, taskID[1], cfg.AggWindowSeconds)
 	}
 }
 
-func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, pool *pgxpool.Pool, eveRoot, taskID string) {
+func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, pool *pgxpool.Pool, eveRoot, taskID string, aggWindow int) {
 	start := time.Now()
 	slog.Info("task start", "task_id", taskID)
 
@@ -129,6 +130,14 @@ func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, po
 	if err != nil {
 		finishErr(ctx, queries, taskID, "ingest: "+err.Error())
 		return
+	}
+
+	// 5. 聚合（S1）：sid+五元组+N 秒窗口分组，保留原始告警
+	if n, err := aggregate.GroupAlerts(ctx, pool, taskID, aggWindow); err != nil {
+		slog.Warn("aggregate failed", "task_id", taskID, "err", err)
+	} else {
+		slog.Info("aggregated", "task_id", taskID, "alerts_grouped", n,
+			"window_seconds", aggWindow)
 	}
 
 	_ = queries.FinishTask(ctx, gen.FinishTaskParams{ID: taskID, Status: "done", Error: pgtext("")})

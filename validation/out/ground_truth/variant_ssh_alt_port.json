@@ -1,0 +1,10 @@
+{
+  "pcap": "variant_ssh_alt_port.pcap",
+  "scenario": "variant_ssh_alt_port",
+  "benign": false,
+  "variant_of": "ssh_bruteforce",
+  "prediction": "miss",
+  "prediction_reason": "1000002 端口写死 22，改 2222 后规则头不匹配；要覆盖非标准端口需按行为（同源高频 SYN）而非端口建模",
+  "expected_alerts": [],
+  "known_limitations": []
+}

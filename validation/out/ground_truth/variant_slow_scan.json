@@ -1,0 +1,10 @@
+{
+  "pcap": "variant_slow_scan.pcap",
+  "scenario": "variant_slow_scan",
+  "benign": false,
+  "variant_of": "syn_port_scan",
+  "prediction": "hit",
+  "prediction_reason": "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。",
+  "expected_alerts": [],
+  "known_limitations": []
+}

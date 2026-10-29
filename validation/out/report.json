@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T09:21:10.774845+00:00",
+  "generated_at": "2026-10-29T10:55:01.523952+00:00",
   "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
   "overall": {
     "tp": 5,
@@ -13,7 +13,7 @@
       "scenario": "benign_mixed_traffic",
       "pcap": "benign_mix.pcap",
       "benign": true,
-      "task_id": "eba996f8-5d10-455e-8e0a-1a7b8829eadf",
+      "task_id": "d21e231c-6b3a-4668-9929-e2a8ff6a1701",
       "task_status": "done",
       "alert_count": 0,
       "tp": 0,
@@ -29,7 +29,7 @@
       "scenario": "dns_tunnel",
       "pcap": "dns_tunnel.pcap",
       "benign": false,
-      "task_id": "930ff5aa-ec79-466b-9a06-74e9b54acb34",
+      "task_id": "44706174-05ca-4266-be7e-10170ca34853",
       "task_status": "done",
       "alert_count": 120,
       "tp": 1,
@@ -51,7 +51,7 @@
       "scenario": "syn_port_scan",
       "pcap": "scan_syn.pcap",
       "benign": false,
-      "task_id": "bca4aa11-7b10-40c9-8e4f-7b848cded2c0",
+      "task_id": "77560680-cd94-4bdf-9a74-53f7e67ad7fa",
       "task_status": "done",
       "alert_count": 78,
       "tp": 1,
@@ -63,7 +63,7 @@
       "expectations": [
         {
           "sid": 1000001,
-          "matched": 75,
+          "matched": 76,
           "min_count": 1
         }
       ],
@@ -73,7 +73,7 @@
       "scenario": "ssh_bruteforce",
       "pcap": "ssh_bruteforce.pcap",
       "benign": false,
-      "task_id": "37e2d54d-ff53-4e48-afc8-9063ec3b71a9",
+      "task_id": "507cafd5-32fc-4860-9fc2-4a9497d16222",
       "task_status": "done",
       "alert_count": 30,
       "tp": 1,
@@ -85,7 +85,7 @@
       "expectations": [
         {
           "sid": 1000002,
-          "matched": 16,
+          "matched": 15,
           "min_count": 1
         }
       ],
@@ -95,7 +95,7 @@
       "scenario": "web_sqli_xss",
       "pcap": "web_attacks.pcap",
       "benign": false,
-      "task_id": "860aff45-c246-414c-9ce2-835454b6fb4f",
+      "task_id": "8120cc95-a4c5-41a8-be30-aa42b0a79ec6",
       "task_status": "done",
       "alert_count": 180,
       "tp": 2,
@@ -117,6 +117,46 @@
         }
       ],
       "fp_samples": []
+    }
+  ],
+  "variants": [
+    {
+      "scenario": "variant_slow_scan",
+      "variant_of": "syn_port_scan",
+      "pcap": "variant_slow_scan.pcap",
+      "prediction": "hit",
+      "prediction_reason": "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。",
+      "actual_alert_count": 59,
+      "actual": "hit",
+      "prediction_correct": true,
+      "sids": [
+        1000001
+      ]
+    },
+    {
+      "scenario": "variant_ssh_alt_port",
+      "variant_of": "ssh_bruteforce",
+      "pcap": "variant_ssh_alt_port.pcap",
+      "prediction": "miss",
+      "prediction_reason": "1000002 端口写死 22，改 2222 后规则头不匹配；要覆盖非标准端口需按行为（同源高频 SYN）而非端口建模",
+      "actual_alert_count": 0,
+      "actual": "miss",
+      "prediction_correct": true,
+      "sids": []
+    },
+    {
+      "scenario": "variant_web_encoded",
+      "variant_of": "web_sqli_xss",
+      "pcap": "variant_web_encoded.pcap",
+      "prediction": "hit",
+      "prediction_reason": "1000003 用 content nocase；1000004 用 pcre 覆盖 %3C 编码，编码与大小写变化都应命中",
+      "actual_alert_count": 60,
+      "actual": "hit",
+      "prediction_correct": true,
+      "sids": [
+        1000003,
+        1000004
+      ]
     }
   ]
 }

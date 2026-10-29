@@ -241,3 +241,49 @@ func (q *Queries) ListAlerts(ctx context.Context, arg ListAlertsParams) ([]ListA
 	}
 	return items, nil
 }
+
+const listUnGroupedAlerts = `-- name: ListUnGroupedAlerts :many
+SELECT id, sid, src_ip, src_port, dest_ip, dest_port, proto, ts
+FROM alerts
+WHERE task_id = $1 AND group_id IS NULL
+`
+
+type ListUnGroupedAlertsRow struct {
+	ID       int64              `json:"id"`
+	Sid      int64              `json:"sid"`
+	SrcIp    string             `json:"src_ip"`
+	SrcPort  pgtype.Int4        `json:"src_port"`
+	DestIp   string             `json:"dest_ip"`
+	DestPort pgtype.Int4        `json:"dest_port"`
+	Proto    pgtype.Text        `json:"proto"`
+	Ts       pgtype.Timestamptz `json:"ts"`
+}
+
+func (q *Queries) ListUnGroupedAlerts(ctx context.Context, taskID string) ([]ListUnGroupedAlertsRow, error) {
+	rows, err := q.db.Query(ctx, listUnGroupedAlerts, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnGroupedAlertsRow
+	for rows.Next() {
+		var i ListUnGroupedAlertsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Sid,
+			&i.SrcIp,
+			&i.SrcPort,
+			&i.DestIp,
+			&i.DestPort,
+			&i.Proto,
+			&i.Ts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

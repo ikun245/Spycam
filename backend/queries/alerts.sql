@@ -28,3 +28,8 @@ FROM alerts WHERE id = $1;
 
 -- name: GetFlow :one
 SELECT * FROM flows WHERE task_id = $1 AND flow_id = $2;
+
+-- name: ListUnGroupedAlerts :many
+SELECT id, sid, src_ip, src_port, dest_ip, dest_port, proto, ts
+FROM alerts
+WHERE task_id = $1 AND group_id IS NULL;

@@ -49,22 +49,22 @@ func (s *Server) Handler() http.Handler {
 	r.Handle("GET /api/v1/alerts/{id}", authed(http.HandlerFunc(s.handleGetAlertRaw)))
 	r.Handle("GET /api/v1/overview", authed(http.HandlerFunc(s.handleOverview)))
 	r.Handle("GET /api/v1/rules", authed(http.HandlerFunc(s.handleListRules)))
-	r.Handle("GET /api/v1/alert-groups", authed(http.HandlerFunc(s.notImplemented)))
+	r.Handle("GET /api/v1/alert-groups", authed(http.HandlerFunc(s.handleListGroups)))
 	r.Handle("GET /api/v1/incidents", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/pcaps", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/replay-tasks", authed(http.HandlerFunc(s.handleListTasks)))
 	r.Handle("GET /api/v1/replay-tasks/{id}", authed(http.HandlerFunc(s.handleGetTask)))
 	r.Handle("GET /api/v1/engine/status", authed(http.HandlerFunc(s.handleEngineStatus)))
-	r.Handle("GET /api/v1/stream", authed(http.HandlerFunc(s.notImplemented)))
-	r.Handle("GET /api/v1/validation/latest", authed(http.HandlerFunc(s.notImplemented)))
+	r.Handle("GET /api/v1/stream", authed(http.HandlerFunc(s.handleStream)))
+	r.Handle("GET /api/v1/validation/latest", authed(http.HandlerFunc(s.handleLatestReport)))
 
 	// analyst+
 	analyst := s.auth.Middleware("analyst")
 	r.Handle("POST /api/v1/pcaps", analyst(http.HandlerFunc(s.handleUploadPcap)))
 	r.Handle("POST /api/v1/replay-tasks", analyst(http.HandlerFunc(s.handleCreateTask)))
 	r.Handle("PATCH /api/v1/rules/{sid}", analyst(http.HandlerFunc(s.handleToggleRule)))
-	r.Handle("PATCH /api/v1/alert-groups/{id}/status", analyst(http.HandlerFunc(s.notImplemented)))
-	r.Handle("GET /api/v1/alerts/{id}/pcap", analyst(http.HandlerFunc(s.notImplemented)))
+	r.Handle("PATCH /api/v1/alert-groups/{id}/status", analyst(http.HandlerFunc(s.handleTriageGroup)))
+	r.Handle("GET /api/v1/alerts/{id}/pcap", analyst(http.HandlerFunc(s.handleExportAlertPcap)))
 
 	return r
 }
