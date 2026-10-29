@@ -219,8 +219,20 @@ func processLine(ctx context.Context, q *gen.Queries, taskID string, line []byte
 			Version:  textPtr(strOrNil(ev.TLS.Version)),
 			Raw:      line,
 		})
+	case "stats":
+		// S6 引擎可观测：周期性 stats 事件写 engine_stats（最新一条供前端读取）
+		if ev.Stats == nil {
+			return nil
+		}
+		return q.CreateEngineStat(ctx, gen.CreateEngineStatParams{
+			Ts:           ts,
+			UptimeSec:    int8Ptr(&ev.Stats.Uptime),
+			RuleLoadMs:   int8Ptr(&ev.Stats.RuleReload),
+			KernelDrops:  int8Ptr(&ev.Stats.KernelPackets.Dropped),
+			AlertsPerMin: int8Ptr(&ev.Stats.Detect.Alerts),
+		})
 	default:
-		return nil // stats 等其他类型：本期只计数
+		return nil // 其余类型只计数
 	}
 }
 

@@ -28,6 +28,7 @@ type Event struct {
 	DNS   *DNS   `json:"dns,omitempty"`
 	HTTP  *HTTP  `json:"http,omitempty"`
 	TLS   *TLS   `json:"tls,omitempty"`
+	Stats *Stats `json:"stats,omitempty"`
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -71,6 +72,21 @@ type HTTP struct {
 type TLS struct {
 	SNI     string `json:"sni"`
 	Version string `json:"version"`
+}
+
+// Stats 是引擎周期统计事件（S6 可观测：丢包、规则加载耗时）。
+type Stats struct {
+	Uptime  int64 `json:"uptime"`
+	Detect  struct {
+		Alerts int64 `json:"alerts"`
+	} `json:"detect"`
+	AlertQueue struct {
+		Dropped int64 `json:"dropped"`
+	} `json:"alert_queue"`
+	KernelPackets struct {
+		Dropped int64 `json:"kernel_drops"`
+	} `json:"kernel_packets"`
+	RuleReload int64 `json:"rule_reload"`
 }
 
 // Parse 解析单行 eve.json；解析失败返回错误由调用方计数跳过。
