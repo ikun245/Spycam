@@ -18,6 +18,7 @@ import (
 	"spycam/backend/internal/config"
 	"spycam/backend/internal/engine"
 	"spycam/backend/internal/ingest"
+	"spycam/backend/internal/incident"
 	"spycam/backend/internal/store/gen"
 )
 
@@ -138,6 +139,13 @@ func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, po
 	} else {
 		slog.Info("aggregated", "task_id", taskID, "alerts_grouped", n,
 			"window_seconds", aggWindow)
+	}
+
+	// 6. 事件串联（S3）：同源 IP 告警组按时间窗归入攻击事件
+	if n, err := incident.ChainTask(ctx, pool, taskID); err != nil {
+		slog.Warn("incident chain failed", "task_id", taskID, "err", err)
+	} else {
+		slog.Info("incidents chained", "task_id", taskID, "incidents", n)
 	}
 
 	_ = queries.FinishTask(ctx, gen.FinishTaskParams{ID: taskID, Status: "done", Error: pgtext("")})

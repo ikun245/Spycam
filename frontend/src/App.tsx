@@ -8,6 +8,8 @@ import Groups from './pages/Groups';
 import Rules from './pages/Rules';
 import DataPage from './pages/Data';
 import Validation from './pages/Validation';
+import Incidents from './pages/Incidents';
+import Engine from './pages/Engine';
 
 const { Header, Sider, Content } = Layout;
 
@@ -15,6 +17,8 @@ const menuItems = [
   { key: '/', label: '总览' },
   { key: '/alerts', label: '告警列表' },
   { key: '/groups', label: '聚合处置' },
+  { key: '/incidents', label: '攻击事件' },
+  { key: '/engine', label: '引擎状态' },
   { key: '/data', label: '数据与回放' },
   { key: '/rules', label: '规则管理' },
   { key: '/validation', label: '自验报告' },
@@ -49,6 +53,8 @@ export default function App() {
                   <Route path="/alerts" element={<Alerts />} />
                   <Route path="/alerts/:id" element={<AlertDetail />} />
                   <Route path="/groups" element={<Groups />} />
+                  <Route path="/incidents" element={<Incidents />} />
+                  <Route path="/engine" element={<Engine />} />
                   <Route path="/data" element={<DataPage />} />
                   <Route path="/rules" element={<Rules />} />
                   <Route path="/validation" element={<Validation />} />
