@@ -1,0 +1,144 @@
+%YAML 1.1
+---
+# Spycam Suricata 配置：unix-socket 常驻 + eve.json 输出（架构设计 §3.1/§11）
+
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80,81,443,3000,8000,8008,8080,8081,8443"
+    SHELLCODE_PORTS: "!80"
+
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - spycam.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+
+# 内部控制：unix-socket 常驻回放（pcap-file / ruleset-reload-nonblocking）
+unix-command:
+  enabled: true
+  filename: /var/run/suricata.socket
+
+# 引擎可观测（S6）：stats 事件写入 eve.json，间隔 10s
+outputs:
+  - eve-log:
+      enabled: true
+      filetype: regular
+      filename: eve.json
+      community-id: true
+      community-id-seed: 0
+      types:
+        - alert:
+            tagged-packets: false
+            payload: true
+            payload-printable: true
+            packet: false
+            metadata: true
+            http-body: false
+            http-body-printable: false
+        - anomaly:
+            enabled: false
+        - dhcp:
+            enabled: false
+        - dnp3
+        - dns:
+            enabled: true
+            requests: true
+            responses: true
+            formats: [detailed]
+        - files:
+            enabled: false
+        - flow
+        - http:
+            enabled: true
+        - ikev2:
+            enabled: false
+        - krb5:
+            enabled: false
+        - ntp:
+            enabled: false
+        - nfs:
+            enabled: false
+        - smb:
+            enabled: true
+        - smtp:
+            enabled: false
+        - ssh
+        - stats:
+            enabled: true
+            totals: true
+            threads: false
+        - tls:
+            enabled: true
+            session-resumption: false
+            long-key: false
+
+  - stats:
+      enabled: true
+      interval: 10
+
+  - fast:
+      enabled: false
+
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: true
+
+stream:
+  memcap: 128mb
+  checksum-validation: no
+  inline: auto
+  reassembly:
+    memcap: 256mb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+
+app-layer:
+  protocols:
+    telnet:
+      enabled: false
+    http:
+      enabled: true
+      libhtp:
+        default-config:
+          personality: IDS
+          request-body-limit: 100kb
+          response-body-limit: 100kb
+          request-body-minimal-inspect-size: 32kb
+          response-body-minimal-inspect-size: 40kb
+    ssh:
+      enabled: true
+    tls:
+      enabled: true
+      detection-flags: []
+    smtp:
+      enabled: false
+    dnp3:
+      enabled: false
+    dns:
+      tcp:
+        enabled: true
+      udp:
+        enabled: true
+
+pcap-file:
+  checksum-checks: auto
+
+# 线程与检测默认值即可；离线回放不涉及接口抓包
+threading:
+  set-cpu-affinity: false
+
+detect:
+  profile: medium
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+
+mpm-algo: auto
+spm-algo: auto

@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: spycam-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spycam}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-spycam}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-spycam}", "-d", "${POSTGRES_DB:-spycam}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [internal]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: spycam-redis
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "notice"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [internal]
+
+  suricata:
+    image: spycam/suricata:0.1.0
+    build:
+      context: .
+      dockerfile: suricata/Dockerfile
+    container_name: spycam-suricata
+    environment:
+      ENGINE_AGENT_TOKEN: ${ENGINE_AGENT_TOKEN:?set ENGINE_AGENT_TOKEN in .env}
+      AGG_WINDOW_SECONDS: ${AGG_WINDOW_SECONDS:-60}
+    volumes:
+      - pcaps:/data/pcaps:ro
+      - rules-active:/etc/suricata/rules-active:ro
+      - eve-out:/var/log/suricata
+    networks: [internal]
+
+  api:
+    image: spycam/api:0.1.0
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    container_name: spycam-api
+    env_file: .env
+    environment:
+      API_LISTEN: ":8081"
+      MIGRATIONS_DIR: /app/migrations
+      SEED_RULES_DIR: /app/seed-rules
+      RULES_ACTIVE_DIR: /rules-active
+      PCAPS_DIR: /data/pcaps
+      ENGINE_AGENT_URL: http://suricata:9090
+    volumes:
+      - pcaps:/data/pcaps
+      - rules-active:/rules-active
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [internal]
+
+  worker:
+    image: spycam/worker:0.1.0
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: spycam-worker
+    env_file: .env
+    environment:
+      MIGRATIONS_DIR: /app/migrations
+      EVE_OUT_DIR: /var/log/suricata
+      ENGINE_AGENT_URL: http://suricata:9090
+    volumes:
+      - eve-out:/var/log/suricata:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      suricata:
+        condition: service_started
+    networks: [internal]
+
+  web:
+    image: spycam/web:0.1.0
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: spycam-web
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api
+    networks: [internal]
+
+  validator:
+    image: spycam/validator:0.1.0
+    build:
+      context: ./validation
+      dockerfile: Dockerfile
+    profiles: ["tools"]
+    environment:
+      API_BASE_URL: http://api:8081
+      VALIDATOR_USER: ${SEED_ADMIN_USER:-admin}
+      VALIDATOR_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
+    volumes:
+      - pcaps:/data/pcaps
+    depends_on:
+      - api
+    networks: [internal]
+
+volumes:
+  pgdata:
+  redisdata:
+  pcaps:
+  eve-out:
+  rules-active:
+
+networks:
+  internal:
+    driver: bridge

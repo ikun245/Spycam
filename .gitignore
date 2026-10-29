@@ -1,0 +1,23 @@
+# 密钥与本地配置不入库（M7）
+.env
+.env.*
+!.env.example
+
+# 依赖与构建产物
+node_modules/
+frontend/dist/
+backend/bin/
+coverage/
+
+# 运行数据（命名卷之外的本地输出）
+data/out/
+validation/report.json
+validation/report.md
+suricata/out/
+
+# 日志与临时文件
+*.log
+tmp/
+
+# 构建临时目录（esbuild TEMP 重定向）
+.tmp/
