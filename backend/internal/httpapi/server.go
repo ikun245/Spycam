@@ -27,8 +27,11 @@ func NewServer(cfg *config.Config, authSvc *auth.Service, agent *engine.Client, 
 func (s *Server) Handler() http.Handler {
 	r := http.NewServeMux()
 
+	// 健康探针：nginx 透传保留 /api 前缀，故注册带前缀路径；同时保留裸路径供容器内直连探测
 	r.HandleFunc("GET /healthz", s.health)
 	r.HandleFunc("GET /readyz", s.ready)
+	r.HandleFunc("GET /api/v1/healthz", s.health)
+	r.HandleFunc("GET /api/v1/readyz", s.ready)
 
 	// 公开：登录
 	r.HandleFunc("POST /api/v1/auth/login", s.handleLogin)

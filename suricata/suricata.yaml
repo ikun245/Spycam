@@ -55,7 +55,7 @@ outputs:
         - flow
         - http:
             enabled: true
-        - ikev2:
+        - ike:
             enabled: false
         - krb5:
             enabled: false
@@ -130,6 +130,11 @@ app-layer:
 
 pcap-file:
   checksum-checks: auto
+
+# 全局 stats 配置（消除 legacy stats.log 警告）
+stats:
+  enabled: yes
+  interval: 10
 
 # 线程与检测默认值即可；离线回放不涉及接口抓包
 threading:

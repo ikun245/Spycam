@@ -38,3 +38,13 @@
 - **修复**：改为 `r.Handle("POST /api/v1/auth/logout", s.auth.Middleware("")(http.HandlerFunc(s.handleLogout)))`，中间件包裹 handler 后再注册
 - **教训**：标准库 `ServeMux`（Go 1.22+ 方法模式）没有中间件概念，鉴权中间件必须显式包裹每个 handler
 
+## Bug-5：Suricata 基础镜像 VOLUME 声明导致规则更新被匿名卷遮蔽
+
+- **日期**：2026-10-29 ｜ **引入位置**：`suricata/Dockerfile`（构建/编排层）
+- **现象**：修复 sid 1000004 规则（`http.uri` → `http.uri.raw`）并重建镜像后，容器内 `suricata -T` 仍报旧规则错误；`docker image inspect` 与 `docker inspect` 显示容器用的就是新镜像 ID，但容器内文件 md5 与镜像内不一致
+- **原因**：`jasonish/suricata` 基础镜像 Dockerfile 里声明了 `VOLUME /etc/suricata`（及 /var/log/suricata 等）。容器重建时 Docker 复用同名匿名卷（旧卷内容=首次创建时的旧规则），把镜像内新文件**遮蔽**了。不是镜像没更新，也不是容器没重建
+- **发现方式**：对比三处内容——宿主机源文件（新）→ 镜像内文件（新，`docker run --rm ... grep`）→ 容器内文件（旧，md5 不同）→ 检查 `.Mounts` 发现匿名卷
+- **验证方式**：`docker compose up -d --force-recreate --renew-anon-volumes suricata` 后 `suricata -T` 输出 "Configuration provided was successfully loaded"
+- **修复**：重建时加 `--renew-anon-volumes`；长期方案是 compose 里把 `/etc/suricata/rules` 显式挂成命名卷或只读 bind，不依赖镜像层文件
+- **教训**：基于声明了 VOLUME 的镜像做改包时，改完必须 `--renew-anon-volumes`，否则"改了没生效"的表象会误导排查方向（先怀疑 build 缓存、再怀疑 compose 没重建，都是错的方向）
+

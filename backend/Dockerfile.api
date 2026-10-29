@@ -13,6 +13,7 @@ USER app
 WORKDIR /app
 COPY --from=build /out/api /app/api
 COPY --from=build /src/migrations /app/migrations
-COPY rules/spycam.rules /app/seed-rules/spycam.rules
+# 种子规则从后端构建上下文内的副本读取（COPY 不能越过上下文根）
+COPY seed-rules/spycam.rules /app/seed-rules/spycam.rules
 EXPOSE 8081
 ENTRYPOINT ["/app/api"]

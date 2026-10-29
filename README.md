@@ -26,11 +26,15 @@ docker compose up -d
 
 | 模块 | 状态 |
 |---|---|
-| docker-compose（7 服务） | ✅ 已编写，待 Docker 环境验证 |
-| Suricata 容器 + 规则（6 条） | ✅ 已编写，`suricata -T` 待容器内验证 |
-| Go 后端（api / worker / engine-agent） | ✅ 骨架编译通过；数据面 handler 为 501 占位 |
-| React 前端（登录 / 总览 / 告警 / 规则） | ✅ 骨架构建通过；列表页为占位 |
+| docker-compose（7 服务） | ✅ 全栈已构建并启动；pg/redis healthy |
+| Suricata 容器 + 规则（6 条） | ✅ 容器内 `suricata -T` 校验通过 |
+| Go 后端（api / worker / engine-agent） | ✅ 登录/健康探针/种子化已验证；数据面 handler 为 501 占位 |
+| React 前端（登录 / 总览 / 告警 / 规则） | ✅ 浏览器实测登录 → 总览渲染正常 |
 | eve 采集归一化、聚合、评测 | ⬜ 未实现（P0 后续） |
+
+已验证的端到端链路：浏览器登录（nginx → api → argon2id → Redis 会话）→ `me` 返回角色；数据库 16 表迁移 + 6 条规则种子 + admin 账号就位。
+
+注意：`jasonish/suricata` 基础镜像声明了 VOLUME，更新内置规则后需 `docker compose up -d --force-recreate --renew-anon-volumes suricata`，否则旧匿名卷会遮蔽新规则文件。
 
 ## 目录
 

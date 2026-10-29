@@ -10,8 +10,8 @@ alert tcp $EXTERNAL_NET any -> $HOME_NET 22 (msg:"SPYCAM SSH bruteforce burst"; 
 # 1000003 SQL 注入：UNION SELECT 特征
 alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"SPYCAM SQLi UNION SELECT in URI or body"; flow:established,to_server; http.uri; content:"UNION"; nocase; content:"SELECT"; nocase; distance:0; classtype:web-application-attack; metadata:stage exploit, mitre_tactic TA0001 Initial Access, mitre_technique T1190 Exploit Public-Facing Application, author spycam; sid:1000003; rev:1;)
 
-# 1000004 XSS 注入：script 标签外带 onerror
-alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"SPYCAM XSS script tag with event handler"; flow:established,to_server; http.uri; pcre:"/<script[^>]*>[^<]*onerror/I"; classtype:web-application-attack; metadata:stage exploit, mitre_tactic TA0001 Initial Access, mitre_technique T1059.007 JavaScript/JScript, author spycam; sid:1000004; rev:1;)
+# 1000004 XSS 注入：script 标签外带 onerror（http.uri 后接 pcre 必须用 raw 缓冲区）
+alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"SPYCAM XSS script tag with event handler"; flow:established,to_server; http.uri.raw; pcre:"/<script[^>]*>[^<]*onerror/I"; classtype:web-application-attack; metadata:stage exploit, mitre_tactic TA0001 Initial Access, mitre_technique T1059.007 JavaScript/JScript, author spycam; sid:1000004; rev:2;)
 
 # 1000005 DNS 隧道：超长 qname 标签（≥40 字符小写字母数字）
 alert dns $HOME_NET any -> $EXTERNAL_NET 53 (msg:"SPYCAM DNS tunnel long label query"; dns.query; pcre:"/^[a-z0-9]{40,}\./i"; classtype:policy-violation; metadata:stage c2, mitre_tactic TA0011 Command and Control, mitre_technique T1071.004 DNS, author spycam; sid:1000005; rev:1;)
