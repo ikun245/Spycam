@@ -2,7 +2,7 @@
   "pcap": "benign_mix.pcap",
   "scenario": "benign_mixed_traffic",
   "benign": true,
-  "description": "正常业务基线：DNS(600)+HTTP 会话(400)+TLS 握手(100)+低频 SSH(5)，共约 3600 包",
+  "description": "正常业务基线：4 终端×4 资产，DNS(600)+HTTP(400)+TLS(100)+SSH(8)，约 3600 包",
   "expected_alerts": [],
   "known_limitations": []
 }

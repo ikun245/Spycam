@@ -1,9 +1,11 @@
-"""M5 场景数据集生成：4 类攻击 + 1 类正常负样本。
+"""M5 场景数据集生成：多源多目标真实化流量。
 
 约定（需求梳理 §5.1/§5.2）：
 - 固定随机种子 + 固定时间戳基线，保证 ground truth 时间窗可复现
 - 单 pcap 1k-50k 包
 - 每个场景配 ground_truth.json（先写预期，后跑检测）
+- 多攻击源/多受害资产/多内网终端：避免所有告警挤在同一 IP，
+  让 TopN、聚合、事件串联呈现真实形态
 
 覆盖规则（rules/spycam.rules）：
 - 1000001 SYN 端口扫描（10s 内 >=20 SYN 到 1-200 端口）
@@ -26,10 +28,17 @@ OUT.mkdir(exist_ok=True)
 
 random.seed(SEED)
 
-VICTIM = "10.0.0.5"
-ATTACKER = "203.0.113.66"
-CLIENT = "10.0.0.100"
+# 多受害资产（内网服务器段）
+VICTIMS = ["10.0.0.5", "10.0.0.6", "10.0.0.7", "10.0.0.8"]
+# 多攻击源（外网不同段；每个场景用独立源 IP，避免 detection_filter 跨任务状态干扰）
+ATTACKERS = ["203.0.113.66", "203.0.113.67", "198.51.100.20", "198.51.100.21", "192.0.2.30"]
+# 内网终端与 DNS
+CLIENTS = ["10.0.0.100", "10.0.0.101", "10.0.0.102", "10.0.0.103"]
 DNS_SERVER = "10.0.0.53"
+
+VICTIM = VICTIMS[0]      # 兼容旧引用
+ATTACKER = ATTACKERS[0]  # 兼容旧引用
+CLIENT = CLIENTS[0]      # 兼容旧引用
 
 
 def ts(i, step=0.05):
@@ -56,58 +65,69 @@ def http_flow(src, dst, sport, dport, uri, method="GET", host="victim.local", t=
 
 
 def gen_syn_scan():
+    """分布式扫描：3 个攻击源分别扫 3 台资产（各自独立触发阈值）。"""
     pkts = []
-    for i, port in enumerate(range(20, 120)):
-        p = IP(src=ATTACKER, dst=VICTIM) / TCP(sport=RandShort(), dport=port, flags="S")
-        p.time = ts(i)
-        pkts.append(p)
+    expectations = []
+    idx = 0
+    for k in range(3):
+        src, dst = ATTACKERS[k], VICTIMS[k]
+        t0 = BASE + k * 30  # 各源间隔 30s，时间窗分开
+        for i, port in enumerate(range(20, 120)):
+            p = IP(src=src, dst=dst) / TCP(sport=RandShort(), dport=port, flags="S")
+            p.time = t0 + i * 0.05
+            pkts.append(p)
+        expectations.append(
+            {
+                "sid": 1000001,
+                "msg": "SPYCAM SYN port scan to low ports",
+                "src_ip": src,
+                "dst_ip": dst,
+                "dst_port_range": [1, 200],
+                "proto": "TCP",
+                "window": {"start": epoch_to_iso(t0), "end": epoch_to_iso(t0 + 6)},
+                "min_count": 1,
+            }
+        )
+        idx += 1
     return pkts, {
         "pcap": "scan_syn.pcap",
         "scenario": "syn_port_scan",
         "benign": False,
-        "description": f"{ATTACKER} 对 {VICTIM} 1-200 端口 SYN 扫描（100 包）",
-        "expected_alerts": [
-            {
-                "sid": 1000001,
-                "msg": "SPYCAM SYN port scan to low ports",
-                "src_ip": ATTACKER,
-                "dst_ip": VICTIM,
-                "dst_port_range": [1, 200],
-                "proto": "TCP",
-                "window": {
-                    "start": epoch_to_iso(BASE),
-                    "end": epoch_to_iso(BASE + 6),
-                },
-                "min_count": 1,
-            }
-        ],
-        "known_limitations": ["慢扫（间隔 > 10s）不会命中 detection_filter 窗口"],
+        "description": "3 个外网源分布式扫描 3 台内网资产（各 100 包，时间窗隔离）",
+        "expected_alerts": expectations,
+        "known_limitations": [],
     }
 
 
 def gen_ssh_bruteforce():
+    """分布式 SSH 爆破：2 个攻击源打 2 台资产的 22 端口。"""
     pkts = []
-    for i in range(40):
-        p = IP(src=ATTACKER, dst=VICTIM) / TCP(sport=RandShort(), dport=22, flags="S")
-        p.time = ts(i, step=0.5)  # 60s 内 40 次
-        pkts.append(p)
+    expectations = []
+    for k in range(2):
+        src, dst = ATTACKERS[k], VICTIMS[k]
+        t0 = BASE + k * 90  # 间隔 90s，避免两个源的 detection_filter 窗口重叠
+        for i in range(40):
+            p = IP(src=src, dst=dst) / TCP(sport=RandShort(), dport=22, flags="S")
+            p.time = t0 + i * 0.5
+            pkts.append(p)
+        expectations.append(
+            {
+                "sid": 1000002,
+                "msg": "SPYCAM SSH bruteforce burst",
+                "src_ip": src,
+                "dst_ip": dst,
+                "dst_port_range": [22, 22],
+                "proto": "TCP",
+                "window": {"start": epoch_to_iso(t0), "end": epoch_to_iso(t0 + 25)},
+                "min_count": 1,
+            }
+        )
     return pkts, {
         "pcap": "ssh_bruteforce.pcap",
         "scenario": "ssh_bruteforce",
         "benign": False,
-        "description": f"{ATTACKER} 对 {VICTIM}:22 SYN 爆破（40 次/20s）",
-        "expected_alerts": [
-            {
-                "sid": 1000002,
-                "msg": "SPYCAM SSH bruteforce burst",
-                "src_ip": ATTACKER,
-                "dst_ip": VICTIM,
-                "dst_port_range": [22, 22],
-                "proto": "TCP",
-                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 25)},
-                "min_count": 1,
-            }
-        ],
+        "description": "2 个外网源对 2 台资产 22 端口 SYN 爆破（各 40 次/20s）",
+        "expected_alerts": expectations,
         "known_limitations": [],
     }
 
@@ -121,22 +141,25 @@ def gen_web_attacks():
     ]
     sport = 40000
     idx = 0
-    for round_no in range(60):
-        for uri in uris:
-            pkts.extend(http_flow(ATTACKER, VICTIM, sport, 80, uri, t=ts(idx, step=0.1)))
-            sport += 1
-            idx += 1
+    # 3 个攻击源轮换打 3 台 Web 资产
+    for round_no in range(40):
+        for k in range(3):
+            src, dst = ATTACKERS[k], VICTIMS[k]
+            for uri in uris:
+                pkts.extend(http_flow(src, dst, sport, 80, uri, t=ts(idx, step=0.1)))
+                sport += 1
+                idx += 1
     return pkts, {
         "pcap": "web_attacks.pcap",
         "scenario": "web_sqli_xss",
         "benign": False,
-        "description": "SQLi UNION + XSS 完整 TCP 会话 HTTP GET（60 会话）",
+        "description": "3 个外网源对 3 台 Web 资产分布式 SQLi+XSS（完整 TCP 会话）",
         "expected_alerts": [
             {
                 "sid": 1000003,
                 "msg": "SPYCAM SQLi UNION SELECT in URI or body",
-                "src_ip": ATTACKER,
-                "dst_ip": VICTIM,
+                "src_ip": ATTACKERS[0],
+                "dst_ip": VICTIMS[0],
                 "dst_port_range": [80, 80],
                 "proto": "TCP",
                 "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 60)},
@@ -145,8 +168,8 @@ def gen_web_attacks():
             {
                 "sid": 1000004,
                 "msg": "SPYCAM XSS script tag with event handler",
-                "src_ip": ATTACKER,
-                "dst_ip": VICTIM,
+                "src_ip": ATTACKERS[1],
+                "dst_ip": VICTIMS[1],
                 "dst_port_range": [80, 80],
                 "proto": "TCP",
                 "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 60)},
@@ -160,19 +183,25 @@ def gen_web_attacks():
 def gen_dns_tunnel():
     pkts = []
     alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-    for i in range(120):
-        label = "".join(random.choice(alphabet) for _ in range(48))
+    # 2 台失陷终端各自产生隧道查询（各自独立命中）
+    for k, client in enumerate(CLIENTS[:2]):
+        t0 = BASE + k * 30
+        for i in range(80):
+            label = "".join(random.choice(alphabet) for _ in range(48))
+            p = (
+                IP(src=client, dst=DNS_SERVER)
+                / UDP(sport=RandShort(), dport=53)
+                / DNS(rd=1, qd=DNSQR(qname=f"{label}.exfil.example.com"))
+            )
+            p.time = t0 + i * 0.2
+            pkts.append(p)
+        if k == 0:
+            tun_src, tun_t0, tun_t1 = client, t0, t0 + 16
+    # 混入其他终端的正常 DNS 作对照
+    for i in range(40):
+        c = CLIENTS[2 + (i % 2)]
         p = (
-            IP(src=CLIENT, dst=DNS_SERVER)
-            / UDP(sport=RandShort(), dport=53)
-            / DNS(rd=1, qd=DNSQR(qname=f"{label}.exfil.example.com"))
-        )
-        p.time = ts(i, step=0.2)
-        pkts.append(p)
-    # 混入正常 DNS 作对照
-    for i in range(20):
-        p = (
-            IP(src=CLIENT, dst=DNS_SERVER)
+            IP(src=c, dst=DNS_SERVER)
             / UDP(sport=RandShort(), dport=53)
             / DNS(rd=1, qd=DNSQR(qname="portal.example.com"))
         )
@@ -182,16 +211,16 @@ def gen_dns_tunnel():
         "pcap": "dns_tunnel.pcap",
         "scenario": "dns_tunnel",
         "benign": False,
-        "description": "120 条超长标签 DNS 查询（>=40 字符）+ 20 条正常查询",
+        "description": "2 台失陷终端各 80 条超长标签查询 + 40 条正常 DNS 对照",
         "expected_alerts": [
             {
                 "sid": 1000005,
                 "msg": "SPYCAM DNS tunnel long label query",
-                "src_ip": CLIENT,
+                "src_ip": CLIENTS[0],
                 "dst_ip": DNS_SERVER,
                 "dst_port_range": [53, 53],
                 "proto": "UDP",
-                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 40)},
+                "window": {"start": epoch_to_iso(tun_t0), "end": epoch_to_iso(tun_t1)},
                 "min_count": 1,
             }
         ],
@@ -200,37 +229,41 @@ def gen_dns_tunnel():
 
 
 def gen_c2_beacon():
-    """C2 心跳：受控主机向外部固定路径高频 POST（规则 1000006：60s 内 ≥10 次）。"""
+    """C2 心跳：2 台失陷终端向同一 C2 服务器高频 POST（各自独立命中）。"""
     pkts = []
     C2_SERVER = "198.51.100.10"
     sport = 46000
     idx = 0
-    for i in range(40):
-        pkts.extend(
-            http_flow(
-                CLIENT, C2_SERVER, sport, 80, "/api/collect",
-                method="POST", host="cdn-metrics.example.com", t=ts(i, step=2.0),
+    expectations = []
+    for k, client in enumerate(CLIENTS[:2]):
+        t0 = BASE + k * 120  # 时间窗隔离
+        for i in range(30):
+            pkts.extend(
+                http_flow(
+                    client, C2_SERVER, sport, 80, "/api/collect",
+                    method="POST", host="cdn-metrics.example.com", t=ts(idx, step=2.0) if k == 0 else t0 + i * 2.0,
+                )
             )
+            sport += 1
+        expectations.append(
+            {
+                "sid": 1000006,
+                "msg": "SPYCAM C2 beacon fixed path POST burst",
+                "src_ip": client,
+                "dst_ip": C2_SERVER,
+                "dst_port_range": [80, 80],
+                "proto": "TCP",
+                "window": {"start": epoch_to_iso(t0), "end": epoch_to_iso(t0 + 70)},
+                "min_count": 1,
+            }
         )
-        sport += 1
-        idx += 1
+        idx += 30
     return pkts, {
         "pcap": "c2_beacon.pcap",
         "scenario": "c2_beacon",
         "benign": False,
-        "description": f"{CLIENT} 向 {C2_SERVER} 固定路径 POST 心跳（40 次/80s）",
-        "expected_alerts": [
-            {
-                "sid": 1000006,
-                "msg": "SPYCAM C2 beacon fixed path POST burst",
-                "src_ip": CLIENT,
-                "dst_ip": C2_SERVER,
-                "dst_port_range": [80, 80],
-                "proto": "TCP",
-                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 90)},
-                "min_count": 1,
-            }
-        ],
+        "description": f"2 台失陷终端向 {C2_SERVER} 固定路径 POST 心跳（各 30 次）",
+        "expected_alerts": expectations,
         "known_limitations": [],
     }
 
@@ -238,16 +271,17 @@ def gen_c2_beacon():
 def gen_benign_mix():
     """负样本：正常 DNS + 正常 HTTP（不含攻击特征）。"""
     pkts = []
-    # 正常 DNS 业务（600 次，多域名轮询）
+    # 正常 DNS 业务：4 台终端轮流（600 次，多域名轮询）
     for i in range(600):
+        c = CLIENTS[i % 4]
         p = (
-            IP(src=CLIENT, dst=DNS_SERVER)
+            IP(src=c, dst=DNS_SERVER)
             / UDP(sport=RandShort(), dport=53)
             / DNS(rd=1, qd=DNSQR(qname=f"svc{i % 23}.example.com"))
         )
         p.time = ts(i, step=0.05)
         pkts.append(p)
-    # 正常 HTTP 浏览业务（400 个完整会话）
+    # 正常 HTTP 浏览业务：终端→多台资产（400 个完整会话）
     uris_benign = [
         "/products/item?id={i}",
         "/static/js/app.{i}.js",
@@ -257,25 +291,29 @@ def gen_benign_mix():
     sport = 50000
     for i in range(400):
         uri = uris_benign[i % 4].format(i=i)
-        pkts.extend(
-            http_flow(CLIENT, VICTIM, sport, 80, uri, t=ts(700 + i, step=0.05))
-        )
+        src = CLIENTS[i % 4]
+        dst = VICTIMS[i % 4]
+        pkts.extend(http_flow(src, dst, sport, 80, uri, t=ts(700 + i, step=0.05)))
         sport += 1
-    # 正常 HTTPS 握手（100 次，注意目的端口避开扫描规则的 1-200 段）
+    # 正常 HTTPS 握手：多终端多资产（端口避开扫描规则的 1-200 段）
     for i in range(100):
-        p = IP(src=CLIENT, dst=VICTIM) / TCP(sport=RandShort(), dport=443, flags="S")
+        src = CLIENTS[i % 4]
+        dst = VICTIMS[i % 4]
+        p = IP(src=src, dst=dst) / TCP(sport=RandShort(), dport=443, flags="S")
         p.time = ts(1200 + i, step=0.1)
         pkts.append(p)
-    # 正常内网 SSH 管理（少量、低频，不触发爆破阈值 10 次/60s）
-    for i in range(5):
-        p = IP(src=CLIENT, dst=VICTIM) / TCP(sport=RandShort(), dport=22, flags="S")
+    # 正常内网 SSH 管理：多终端低频（不触发爆破阈值 10 次/60s）
+    for i in range(8):
+        src = CLIENTS[i % 4]
+        dst = VICTIMS[i % 4]
+        p = IP(src=src, dst=dst) / TCP(sport=RandShort(), dport=22, flags="S")
         p.time = ts(1400 + i * 20, step=0.1)
         pkts.append(p)
     return pkts, {
         "pcap": "benign_mix.pcap",
         "scenario": "benign_mixed_traffic",
         "benign": True,
-        "description": "正常业务基线：DNS(600)+HTTP 会话(400)+TLS 握手(100)+低频 SSH(5)，共约 3600 包",
+        "description": "正常业务基线：4 终端×4 资产，DNS(600)+HTTP(400)+TLS(100)+SSH(8)，约 3600 包",
         "expected_alerts": [],
         "known_limitations": [],
     }

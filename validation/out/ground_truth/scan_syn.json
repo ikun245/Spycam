@@ -2,7 +2,7 @@
   "pcap": "scan_syn.pcap",
   "scenario": "syn_port_scan",
   "benign": false,
-  "description": "203.0.113.66 对 10.0.0.5 1-200 端口 SYN 扫描（100 包）",
+  "description": "3 个外网源分布式扫描 3 台内网资产（各 100 包，时间窗隔离）",
   "expected_alerts": [
     {
       "sid": 1000001,
@@ -19,9 +19,39 @@
         "end": "2026-01-01T00:00:06Z"
       },
       "min_count": 1
+    },
+    {
+      "sid": 1000001,
+      "msg": "SPYCAM SYN port scan to low ports",
+      "src_ip": "203.0.113.67",
+      "dst_ip": "10.0.0.6",
+      "dst_port_range": [
+        1,
+        200
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:00:30Z",
+        "end": "2026-01-01T00:00:36Z"
+      },
+      "min_count": 1
+    },
+    {
+      "sid": 1000001,
+      "msg": "SPYCAM SYN port scan to low ports",
+      "src_ip": "198.51.100.20",
+      "dst_ip": "10.0.0.7",
+      "dst_port_range": [
+        1,
+        200
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:01:00Z",
+        "end": "2026-01-01T00:01:06Z"
+      },
+      "min_count": 1
     }
   ],
-  "known_limitations": [
-    "慢扫（间隔 > 10s）不会命中 detection_filter 窗口"
-  ]
+  "known_limitations": []
 }

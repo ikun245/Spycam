@@ -2,7 +2,7 @@
   "pcap": "web_attacks.pcap",
   "scenario": "web_sqli_xss",
   "benign": false,
-  "description": "SQLi UNION + XSS 完整 TCP 会话 HTTP GET（60 会话）",
+  "description": "3 个外网源对 3 台 Web 资产分布式 SQLi+XSS（完整 TCP 会话）",
   "expected_alerts": [
     {
       "sid": 1000003,
@@ -23,8 +23,8 @@
     {
       "sid": 1000004,
       "msg": "SPYCAM XSS script tag with event handler",
-      "src_ip": "203.0.113.66",
-      "dst_ip": "10.0.0.5",
+      "src_ip": "203.0.113.67",
+      "dst_ip": "10.0.0.6",
       "dst_port_range": [
         80,
         80

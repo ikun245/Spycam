@@ -2,7 +2,7 @@
   "pcap": "ssh_bruteforce.pcap",
   "scenario": "ssh_bruteforce",
   "benign": false,
-  "description": "203.0.113.66 对 10.0.0.5:22 SYN 爆破（40 次/20s）",
+  "description": "2 个外网源对 2 台资产 22 端口 SYN 爆破（各 40 次/20s）",
   "expected_alerts": [
     {
       "sid": 1000002,
@@ -17,6 +17,22 @@
       "window": {
         "start": "2026-01-01T00:00:00Z",
         "end": "2026-01-01T00:00:25Z"
+      },
+      "min_count": 1
+    },
+    {
+      "sid": 1000002,
+      "msg": "SPYCAM SSH bruteforce burst",
+      "src_ip": "203.0.113.67",
+      "dst_ip": "10.0.0.6",
+      "dst_port_range": [
+        22,
+        22
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:01:30Z",
+        "end": "2026-01-01T00:01:55Z"
       },
       "min_count": 1
     }

@@ -2,7 +2,7 @@
   "pcap": "dns_tunnel.pcap",
   "scenario": "dns_tunnel",
   "benign": false,
-  "description": "120 条超长标签 DNS 查询（>=40 字符）+ 20 条正常查询",
+  "description": "2 台失陷终端各 80 条超长标签查询 + 40 条正常 DNS 对照",
   "expected_alerts": [
     {
       "sid": 1000005,
@@ -16,7 +16,7 @@
       "proto": "UDP",
       "window": {
         "start": "2026-01-01T00:00:00Z",
-        "end": "2026-01-01T00:00:40Z"
+        "end": "2026-01-01T00:00:16Z"
       },
       "min_count": 1
     }

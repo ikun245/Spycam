@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-10-29T12:34:32.518239+00:00",
+  "generated_at": "2026-10-29T12:41:21.630575+00:00",
   "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
   "overall": {
-    "tp": 6,
+    "tp": 10,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
@@ -13,7 +13,7 @@
       "scenario": "benign_mixed_traffic",
       "pcap": "benign_mix.pcap",
       "benign": true,
-      "task_id": "9a96f440-c7ea-41f6-8015-178cfe14890b",
+      "task_id": "86c11ec4-6c81-48b0-a67f-4935a3502e84",
       "task_status": "done",
       "alert_count": 0,
       "tp": 0,
@@ -29,16 +29,21 @@
       "scenario": "c2_beacon",
       "pcap": "c2_beacon.pcap",
       "benign": false,
-      "task_id": "5ecb4bf1-3524-4e13-b265-1596d531d6e7",
+      "task_id": "04242ec7-29fc-4997-8d70-3321b012f9ac",
       "task_status": "done",
-      "alert_count": 20,
-      "tp": 1,
+      "alert_count": 40,
+      "tp": 2,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
       "expectations": [
+        {
+          "sid": 1000006,
+          "matched": 20,
+          "min_count": 1
+        },
         {
           "sid": 1000006,
           "matched": 20,
@@ -51,9 +56,9 @@
       "scenario": "dns_tunnel",
       "pcap": "dns_tunnel.pcap",
       "benign": false,
-      "task_id": "c5ebfb56-9bb9-47ff-bc69-fa2802c084f9",
+      "task_id": "71b2af33-4545-4379-ba4f-ead791a7bd53",
       "task_status": "done",
-      "alert_count": 120,
+      "alert_count": 160,
       "tp": 1,
       "fp": 0,
       "fn": 0,
@@ -63,7 +68,7 @@
       "expectations": [
         {
           "sid": 1000005,
-          "matched": 96,
+          "matched": 64,
           "min_count": 1
         }
       ],
@@ -73,10 +78,10 @@
       "scenario": "syn_port_scan",
       "pcap": "scan_syn.pcap",
       "benign": false,
-      "task_id": "78a06b0e-508a-4571-b0ab-f3e45c8bcf99",
+      "task_id": "479f456c-e6e5-4924-b83e-e6015eb82173",
       "task_status": "done",
-      "alert_count": 78,
-      "tp": 1,
+      "alert_count": 234,
+      "tp": 3,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
@@ -87,6 +92,16 @@
           "sid": 1000001,
           "matched": 75,
           "min_count": 1
+        },
+        {
+          "sid": 1000001,
+          "matched": 75,
+          "min_count": 1
+        },
+        {
+          "sid": 1000001,
+          "matched": 74,
+          "min_count": 1
         }
       ],
       "fp_samples": []
@@ -95,10 +110,10 @@
       "scenario": "ssh_bruteforce",
       "pcap": "ssh_bruteforce.pcap",
       "benign": false,
-      "task_id": "068274f0-6467-45bd-98a8-93fda902c223",
+      "task_id": "ce521367-74f5-4899-963e-5a724df9dbc4",
       "task_status": "done",
-      "alert_count": 30,
-      "tp": 1,
+      "alert_count": 60,
+      "tp": 2,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
@@ -109,6 +124,11 @@
           "sid": 1000002,
           "matched": 15,
           "min_count": 1
+        },
+        {
+          "sid": 1000002,
+          "matched": 13,
+          "min_count": 1
         }
       ],
       "fp_samples": []
@@ -117,9 +137,9 @@
       "scenario": "web_sqli_xss",
       "pcap": "web_attacks.pcap",
       "benign": false,
-      "task_id": "835cc84c-2f1a-4351-aad8-cf65a13eb14b",
+      "task_id": "4cc8baea-58b4-443d-a786-2cf05ca723cd",
       "task_status": "done",
-      "alert_count": 180,
+      "alert_count": 360,
       "tp": 2,
       "fp": 0,
       "fn": 0,
@@ -129,12 +149,12 @@
       "expectations": [
         {
           "sid": 1000003,
-          "matched": 120,
+          "matched": 80,
           "min_count": 1
         },
         {
           "sid": 1000004,
-          "matched": 60,
+          "matched": 40,
           "min_count": 1
         }
       ],
