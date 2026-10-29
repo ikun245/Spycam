@@ -10,8 +10,10 @@
 
 ## 当前状态
 
-- 仅完成文档，代码骨架尚未创建；目标目录结构见架构设计 §9.2，不要发明新的顶层目录
-- 镜像未构建、服务未起过；架构设计 §13 的待验证事项需要在最小闭环时用真实环境确认
+- 全链路已实现并在 Docker 中跑通过（api/worker/engine-agent/suricata/postgres/redis/web/validator）；目录结构见架构设计 §9.2，不要发明新的顶层目录
+- 已知缺陷与未实现项以 README「当前已知缺陷」为准；自验数字以 `validation/out/report.md` 重跑结果为准，不要手抄旧数字
+- sqlc：宿主机无可用 sqlc（Windows 二进制缺 DLL、32 位 Go 编译过慢），改查询后用 `docker run --rm -v ${PWD}/backend:/src -w /src sqlc/sqlc:1.27.0 generate` 生成；Docker 不可用时手写的生成代码必须事后用该命令比对
+- 新增迁移放 `backend/migrations/000N_*.sql`（goose 格式），api/worker 启动时自动执行
 
 ## 环境（Windows，注意）
 
@@ -21,7 +23,7 @@
 - PowerShell 5.1：含中文的 `.ps1` 必须保存为 UTF-8 带 BOM，否则中文乱码甚至报假的括号不匹配语法错误；原生命令参数里的内层双引号会被剥掉，复杂参数改写入临时文件传递
 - 仓库通过 `.gitattributes` 对 `*.sh`、`Dockerfile`、`*.yml` 强制 LF，避免 Windows 换行符破坏容器内脚本
 
-## 命令（骨架建立后生效）
+## 命令
 
 - `docker compose up -d` — 启动全部服务；仅 `web` 暴露 `127.0.0.1:8080`
 - `docker compose --profile tools run --rm validator` — 数据自验（即 `make validate` 的等价物）；Windows 无 make 时用 `scripts/` 下的 PowerShell 包装
