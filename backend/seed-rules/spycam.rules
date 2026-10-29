@@ -1,11 +1,11 @@
 # Spycam 自定义规则（M2：仓库内规则 ≥5 条；metadata 必含 stage/mitre，供 S3/C3 使用）
 # sid 从 1000001 连续分配
 
-# 1000001 端口扫描：10s 内同源 ≥20 个 SYN
-alert tcp $EXTERNAL_NET any -> $HOME_NET [1:200] (msg:"SPYCAM SYN port scan to low ports"; flags:S; flow:stateless; detection_filter:track by_src, count 20, seconds 10; classtype:attempted-recon; metadata:stage recon, mitre_tactic TA0007 Discovery, mitre_technique T1046 Network Service Discovery, author spycam; sid:1000001; rev:1;)
+# 1000001 端口扫描：10s 内同源 ≥20 个 SYN（源用 any：内网横向扫描同样要检出）
+alert tcp any any -> $HOME_NET [1:200] (msg:"SPYCAM SYN port scan to low ports"; flags:S; flow:stateless; detection_filter:track by_src, count 20, seconds 10; classtype:attempted-recon; metadata:stage recon, mitre_tactic TA0007 Discovery, mitre_technique T1046 Network Service Discovery, author spycam; sid:1000001; rev:2;)
 
-# 1000002 SSH 爆破：60s 内同源对 22 端口 ≥10 次 SYN
-alert tcp $EXTERNAL_NET any -> $HOME_NET 22 (msg:"SPYCAM SSH bruteforce burst"; flags:S; flow:stateless; detection_filter:track by_src, count 10, seconds 60; classtype:attempted-admin; metadata:stage bruteforce, mitre_tactic TA0006 Credential Access, mitre_technique T1110 Brute Force, author spycam; sid:1000002; rev:1;)
+# 1000002 SSH 爆破：60s 内同源对 22 端口 ≥10 次 SYN（源 any：内网横向同样检出）
+alert tcp any any -> $HOME_NET 22 (msg:"SPYCAM SSH bruteforce burst"; flags:S; flow:stateless; detection_filter:track by_src, count 10, seconds 60; classtype:attempted-admin; metadata:stage bruteforce, mitre_tactic TA0006 Credential Access, mitre_technique T1110 Brute Force, author spycam; sid:1000002; rev:2;)
 
 # 1000003 SQL 注入：UNION SELECT 特征
 alert http $EXTERNAL_NET any -> $HOME_NET $HTTP_PORTS (msg:"SPYCAM SQLi UNION SELECT in URI or body"; flow:established,to_server; http.uri; content:"UNION"; nocase; content:"SELECT"; nocase; distance:0; classtype:web-application-attack; metadata:stage exploit, mitre_tactic TA0001 Initial Access, mitre_technique T1190 Exploit Public-Facing Application, author spycam; sid:1000003; rev:1;)

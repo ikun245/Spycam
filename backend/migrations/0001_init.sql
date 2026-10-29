@@ -215,20 +215,4 @@ CREATE INDEX idx_http_task_ts ON http_events (task_id, ts);
 CREATE INDEX idx_tls_task_ts ON tls_events (task_id, ts);
 CREATE INDEX idx_tasks_status ON replay_tasks (status);
 
--- +goose Down
-DROP TABLE IF EXISTS engine_stats;
-DROP TABLE IF EXISTS audit_log;
-DROP TABLE IF EXISTS triage_actions;
-DROP TABLE IF EXISTS incident_alerts;
-DROP TABLE IF EXISTS incidents;
-DROP TABLE IF EXISTS tls_events;
-DROP TABLE IF EXISTS http_events;
-DROP TABLE IF EXISTS dns_events;
-DROP TABLE IF EXISTS flows;
-DROP TABLE IF EXISTS alert_groups;
-DROP TABLE IF EXISTS alerts;
-DROP TABLE IF EXISTS replay_tasks;
-DROP TABLE IF EXISTS pcaps;
-DROP TABLE IF EXISTS rule_revisions;
-DROP TABLE IF EXISTS rules;
-DROP TABLE IF EXISTS users;
+-- P0 阶段迁移仅前进不回滚（48h 项目约定）；schema 同时作为 sqlc 的 schema 输入

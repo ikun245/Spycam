@@ -75,7 +75,7 @@ func main() {
 	}
 
 	agent := engine.NewClient(cfg.EngineAgentURL, cfg.EngineAgentToken)
-	srv := httpapi.NewServer(cfg, auth.NewService(pool, rdb, cfg.SessionTTL), agent,
+	srv := httpapi.NewServer(cfg, auth.NewService(pool, rdb, cfg.SessionTTL), agent, pool, rdb,
 		observability.HealthzHandler, observability.ReadyHandler(checks))
 
 	httpSrv := &http.Server{

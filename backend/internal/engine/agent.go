@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -40,9 +42,29 @@ func (a *AgentServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", a.auth(a.handleStatus))
 	mux.HandleFunc("POST /v1/replay", a.auth(a.handleReplay))
+	mux.HandleFunc("GET /v1/replay-status", a.auth(a.handleReplayStatus))
 	mux.HandleFunc("POST /v1/reload", a.auth(a.handleReload))
 	mux.HandleFunc("POST /v1/validate-rules", a.auth(a.handleValidate))
 	return mux
+}
+
+// handleReplayStatus 转发 pcap-current / pcap-file-number，
+// worker 据此判断回放是否完成（Suricata 按任务串行处理）。
+func (a *AgentServer) handleReplayStatus(w http.ResponseWriter, r *http.Request) {
+	cmd := NewSuricataCmd(a.socketPat, 10*time.Second)
+	out := map[string]any{}
+	for name, key := range map[string]string{
+		"pcap-current":     "current",
+		"pcap-file-number": "queued",
+	} {
+		msg, err := cmd.Do(r.Context(), name, nil)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		out[key] = msg
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *AgentServer) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -56,9 +78,11 @@ func (a *AgentServer) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (a *AgentServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	// 骨架期：只探测 socket 是否存在；真实计数器走 dump-counters（待验证，架构设计 §13）
+	// Close immediately: an idle client can block Suricata's command socket.
 	st := Status{}
-	if _, err := net.Dial("unix", a.socketPat); err == nil {
+	conn, err := net.DialTimeout("unix", a.socketPat, time.Second)
+	if err == nil {
+		_ = conn.Close()
 		st.Running = true
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -70,6 +94,8 @@ type replayRequest struct {
 	PcapID string `json:"pcap_id"`
 }
 
+// handleReplay 经 unix socket 提交 pcap-file 命令：引擎在同一容器内读 pcaps 卷，
+// 输出写到按任务隔离的目录 eve-out/tasks/<task_id>/（架构设计 §3.1）。
 func (a *AgentServer) handleReplay(w http.ResponseWriter, r *http.Request) {
 	var req replayRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
@@ -80,12 +106,24 @@ func (a *AgentServer) handleReplay(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"task_id/pcap_id must be UUID"}`, http.StatusBadRequest)
 		return
 	}
-	// 骨架期占位：真实实现经 unix socket 发送 pcap-file 命令（命令名待验证）
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error":  "not implemented in skeleton",
-		"task":   req.TaskID,
-		"pcap":   req.PcapID,
+	pcapPath := "/data/pcaps/" + req.PcapID + ".pcap"
+	outDir := "/var/log/suricata/tasks/" + req.TaskID
+	// Suricata pcap-file 要求输出目录必须已存在
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create output dir: " + err.Error()})
+		return
+	}
+
+	cmd := NewSuricataCmd(a.socketPat, 60*time.Second)
+	msg, err := cmd.Do(r.Context(), "pcap-file", map[string]string{
+		"filename":   pcapPath,
+		"output-dir": outDir,
 	})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "output_dir": outDir, "engine": msg})
 }
 
 func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +194,29 @@ func (c *Client) Status(ctx context.Context) (*Status, error) {
 // Reload 触发规则校验/重载。
 func (c *Client) Reload(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/v1/reload", nil, nil)
+}
+
+// Replay 提交回放任务。
+func (c *Client) Replay(ctx context.Context, taskID, pcapID string) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]string{"task_id": taskID, "pcap_id": pcapID}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/replay", bytes.NewReader(buf), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReplayStatus 查询引擎回放进度（pcap-current 等）。
+func (c *Client) ReplayStatus(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := c.do(ctx, http.MethodGet, "/v1/replay-status", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, out any) error {

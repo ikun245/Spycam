@@ -15,6 +15,8 @@
 
 ## 环境（Windows，注意）
 
+- **长命令必须实时输出日志**（用户硬性要求）：禁止 `2>&1 | Select-Object | Out-String` 全缓冲；裸跑原生命令或 `Tee-Object` 落盘，长任务用 async + 周期汇报进度。详见 [.github/instructions/terminal-output.instructions.md](.github/instructions/terminal-output.instructions.md)
+
 - Docker CLI 29.6.2 + Compose v5.3.1 已安装，但 **Docker Desktop 守护进程经常未运行**：任何 compose 命令前先 `docker info` 探活，失败则提示用户手动启动 Docker Desktop，不要尝试提权代启
 - PowerShell 5.1：含中文的 `.ps1` 必须保存为 UTF-8 带 BOM，否则中文乱码甚至报假的括号不匹配语法错误；原生命令参数里的内层双引号会被剥掉，复杂参数改写入临时文件传递
 - 仓库通过 `.gitattributes` 对 `*.sh`、`Dockerfile`、`*.yml` 强制 LF，避免 Windows 换行符破坏容器内脚本

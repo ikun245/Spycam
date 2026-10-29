@@ -19,4 +19,13 @@
 - **实际选择**：c。理由：unix-socket 控制协议是架构设计 §13 的待验证项，未上真机前写全大概率返工；501 占位让 API 契约先行，前后端可并行
 - **结果验证**：`go build ./...`、`go vet`、`npm run build` 全部通过；真实验证待 Docker 可用
 
+## D-3 P0 卡点分层：控制通道假故障 vs 数据面未实现
+
+- **日期**：2026-10-29
+- **现象**：`suricatasc` 长时间无响应，容易误判为 Suricata unix-socket 不兼容。
+- **备选原因**：a) socket 路径/参数错；b) Suricata 不接受控制命令；c) `/readyz` 的状态探针留下空闲连接；d) 回放 API 和 worker 尚未实现。
+- **验证过程**：确认参数格式为 `suricatasc -c uptime /var/run/suricata.socket`；重启清空旧连接后命令返回 `OK`；修复探针后连续 5 次 `/readyz` 均 200，`uptime` 仍成功；`pcap-file` 命令清楚返回 filename 不存在，确认控制命令工作。另一方面，真实 `POST /api/v1/replay-tasks` 返回 501，worker 代码只连 PG/Redis 后等待信号。
+- **判断与结论**：c 是造成控制通道排查卡住的真实 bug，已修复；d 才是当前“无法验收 P0 闭环”的根因。P0 不能因为服务健康或引擎可控就宣称完成。
+- **后续**：实现上传与回放任务 API、worker 队列消费、eve 解析入库，再用真实 pcap 验收。
+
 （后续决策按此格式追加）

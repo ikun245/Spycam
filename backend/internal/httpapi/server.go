@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
 	"spycam/backend/internal/auth"
 	"spycam/backend/internal/config"
 	"spycam/backend/internal/engine"
@@ -14,13 +17,15 @@ type Server struct {
 	cfg    *config.Config
 	auth   *auth.Service
 	agent  *engine.Client
+	pool   *pgxpool.Pool
+	rdb    *redis.Client
 	ready  http.HandlerFunc
 	health http.HandlerFunc
 }
 
-// NewServer 构造 API Server。
-func NewServer(cfg *config.Config, authSvc *auth.Service, agent *engine.Client, health, ready http.HandlerFunc) *Server {
-	return &Server{cfg: cfg, auth: authSvc, agent: agent, health: health, ready: ready}
+// NewServer 构造 API Server.
+func NewServer(cfg *config.Config, authSvc *auth.Service, agent *engine.Client, pool *pgxpool.Pool, rdb *redis.Client, health, ready http.HandlerFunc) *Server {
+	return &Server{cfg: cfg, auth: authSvc, agent: agent, pool: pool, rdb: rdb, health: health, ready: ready}
 }
 
 // Handler 返回完整路由。
@@ -40,22 +45,23 @@ func (s *Server) Handler() http.Handler {
 	// 需要登录（viewer+）
 	authed := s.auth.Middleware("viewer")
 	r.Handle("GET /api/v1/auth/me", authed(http.HandlerFunc(s.handleMe)))
-	r.Handle("GET /api/v1/alerts", authed(http.HandlerFunc(s.notImplemented)))
-	r.Handle("GET /api/v1/alerts/{id}", authed(http.HandlerFunc(s.notImplemented)))
+	r.Handle("GET /api/v1/alerts", authed(http.HandlerFunc(s.handleListAlerts)))
+	r.Handle("GET /api/v1/alerts/{id}", authed(http.HandlerFunc(s.handleGetAlert)))
 	r.Handle("GET /api/v1/alert-groups", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/overview", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/incidents", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/rules", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/pcaps", authed(http.HandlerFunc(s.notImplemented)))
-	r.Handle("GET /api/v1/replay-tasks", authed(http.HandlerFunc(s.notImplemented)))
+	r.Handle("GET /api/v1/replay-tasks", authed(http.HandlerFunc(s.handleListTasks)))
+	r.Handle("GET /api/v1/replay-tasks/{id}", authed(http.HandlerFunc(s.handleGetTask)))
 	r.Handle("GET /api/v1/engine/status", authed(http.HandlerFunc(s.handleEngineStatus)))
 	r.Handle("GET /api/v1/stream", authed(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/validation/latest", authed(http.HandlerFunc(s.notImplemented)))
 
 	// analyst+
 	analyst := s.auth.Middleware("analyst")
-	r.Handle("POST /api/v1/pcaps", analyst(http.HandlerFunc(s.notImplemented)))
-	r.Handle("POST /api/v1/replay-tasks", analyst(http.HandlerFunc(s.notImplemented)))
+	r.Handle("POST /api/v1/pcaps", analyst(http.HandlerFunc(s.handleUploadPcap)))
+	r.Handle("POST /api/v1/replay-tasks", analyst(http.HandlerFunc(s.handleCreateTask)))
 	r.Handle("PATCH /api/v1/rules/{sid}", analyst(http.HandlerFunc(s.notImplemented)))
 	r.Handle("PATCH /api/v1/alert-groups/{id}/status", analyst(http.HandlerFunc(s.notImplemented)))
 	r.Handle("GET /api/v1/alerts/{id}/pcap", analyst(http.HandlerFunc(s.notImplemented)))

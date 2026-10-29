@@ -4,12 +4,14 @@ import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Alerts from './pages/Alerts';
 import Rules from './pages/Rules';
+import DataPage from './pages/Data';
 
 const { Header, Sider, Content } = Layout;
 
 const menuItems = [
   { key: '/', label: '总览' },
   { key: '/alerts', label: '告警列表' },
+  { key: '/data', label: '数据与回放' },
   { key: '/rules', label: '规则管理' },
 ];
 
@@ -40,6 +42,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<Overview />} />
                   <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/data" element={<DataPage />} />
                   <Route path="/rules" element={<Rules />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
