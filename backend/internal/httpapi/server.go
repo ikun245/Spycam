@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	analyst := s.auth.Middleware("analyst")
 	r.Handle("POST /api/v1/pcaps", analyst(http.HandlerFunc(s.handleUploadPcap)))
 	r.Handle("POST /api/v1/replay-tasks", analyst(http.HandlerFunc(s.handleCreateTask)))
+	r.Handle("POST /api/v1/rules", analyst(http.HandlerFunc(s.handleCreateRule)))
 	r.Handle("PATCH /api/v1/rules/{sid}", analyst(http.HandlerFunc(s.handleToggleRule)))
 	r.Handle("PATCH /api/v1/alert-groups/{id}/status", analyst(http.HandlerFunc(s.handleTriageGroup)))
 	r.Handle("GET /api/v1/alerts/{id}/pcap", analyst(http.HandlerFunc(s.handleExportAlertPcap)))

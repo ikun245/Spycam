@@ -52,6 +52,7 @@ func (s *Server) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 生成启用的规则文件（原子写）
+	// 3. 热重载（agent 内部走 ruleset-reload-nonblocking）；失败则回滚 DB 与文件
 	enabledRows, err := q.ListEnabledRules(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list enabled failed")
@@ -61,8 +62,6 @@ func (s *Server) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "generate rules file failed")
 		return
 	}
-
-	// 3. 热重载（agent 内部走 ruleset-reload-nonblocking）
 	if err := s.agent.Reload(r.Context()); err != nil {
 		// 回滚数据库与文件，保证一致
 		_ = q.SetRuleEnabled(r.Context(), gen.SetRuleEnabledParams{Sid: sid, Enabled: !*req.Enabled})

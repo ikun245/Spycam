@@ -55,16 +55,149 @@ func (q *Queries) CountRules(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createRule = `-- name: CreateRule :one
+INSERT INTO rules (sid, raw, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source)
+VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8, 'custom')
+RETURNING sid, raw, msg, enabled, classtype, severity, stage, mitre_tactic, mitre_technique, source
+`
+
+type CreateRuleParams struct {
+	Sid            int64       `json:"sid"`
+	Raw            string      `json:"raw"`
+	Msg            string      `json:"msg"`
+	Classtype      pgtype.Text `json:"classtype"`
+	Severity       pgtype.Int4 `json:"severity"`
+	Stage          pgtype.Text `json:"stage"`
+	MitreTactic    pgtype.Text `json:"mitre_tactic"`
+	MitreTechnique pgtype.Text `json:"mitre_technique"`
+}
+
+type CreateRuleRow struct {
+	Sid            int64       `json:"sid"`
+	Raw            string      `json:"raw"`
+	Msg            string      `json:"msg"`
+	Enabled        bool        `json:"enabled"`
+	Classtype      pgtype.Text `json:"classtype"`
+	Severity       pgtype.Int4 `json:"severity"`
+	Stage          pgtype.Text `json:"stage"`
+	MitreTactic    pgtype.Text `json:"mitre_tactic"`
+	MitreTechnique pgtype.Text `json:"mitre_technique"`
+	Source         string      `json:"source"`
+}
+
+func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (CreateRuleRow, error) {
+	row := q.db.QueryRow(ctx, createRule,
+		arg.Sid,
+		arg.Raw,
+		arg.Msg,
+		arg.Classtype,
+		arg.Severity,
+		arg.Stage,
+		arg.MitreTactic,
+		arg.MitreTechnique,
+	)
+	var i CreateRuleRow
+	err := row.Scan(
+		&i.Sid,
+		&i.Raw,
+		&i.Msg,
+		&i.Enabled,
+		&i.Classtype,
+		&i.Severity,
+		&i.Stage,
+		&i.MitreTactic,
+		&i.MitreTechnique,
+		&i.Source,
+	)
+	return i, err
+}
+
+const nextCustomSid = `-- name: NextCustomSid :one
+SELECT COALESCE(max(sid), 2000000) + 1 AS next_sid FROM rules WHERE sid >= 2000000
+`
+
+func (q *Queries) NextCustomSid(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, nextCustomSid)
+	var next_sid int32
+	err := row.Scan(&next_sid)
+	return next_sid, err
+}
+
+const severityDistribution = `-- name: SeverityDistribution :many
+SELECT severity, count(*) AS cnt
+FROM alerts
+WHERE severity IS NOT NULL
+GROUP BY severity ORDER BY severity
+`
+
+type SeverityDistributionRow struct {
+	Severity pgtype.Int4 `json:"severity"`
+	Cnt      int64       `json:"cnt"`
+}
+
+func (q *Queries) SeverityDistribution(ctx context.Context) ([]SeverityDistributionRow, error) {
+	rows, err := q.db.Query(ctx, severityDistribution)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SeverityDistributionRow
+	for rows.Next() {
+		var i SeverityDistributionRow
+		if err := rows.Scan(&i.Severity, &i.Cnt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const stageDistribution = `-- name: StageDistribution :many
+SELECT COALESCE(r.stage, '未分类') AS stage, count(*) AS cnt
+FROM alerts a
+LEFT JOIN rules r ON r.sid = a.sid
+GROUP BY COALESCE(r.stage, '未分类')
+ORDER BY cnt DESC
+`
+
+type StageDistributionRow struct {
+	Stage string `json:"stage"`
+	Cnt   int64  `json:"cnt"`
+}
+
+func (q *Queries) StageDistribution(ctx context.Context) ([]StageDistributionRow, error) {
+	rows, err := q.db.Query(ctx, stageDistribution)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StageDistributionRow
+	for rows.Next() {
+		var i StageDistributionRow
+		if err := rows.Scan(&i.Stage, &i.Cnt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const topDestPorts = `-- name: TopDestPorts :many
 SELECT dest_port, count(*) AS cnt
 FROM alerts
-WHERE ts >= $1 AND dest_port IS NOT NULL
-GROUP BY dest_port ORDER BY cnt DESC LIMIT $2
+WHERE ts >= $2 AND dest_port IS NOT NULL
+GROUP BY dest_port ORDER BY cnt DESC LIMIT $1
 `
 
 type TopDestPortsParams struct {
-	Ts    pgtype.Timestamptz `json:"ts"`
 	Limit int32              `json:"limit"`
+	Since pgtype.Timestamptz `json:"since"`
 }
 
 type TopDestPortsRow struct {
@@ -73,7 +206,7 @@ type TopDestPortsRow struct {
 }
 
 func (q *Queries) TopDestPorts(ctx context.Context, arg TopDestPortsParams) ([]TopDestPortsRow, error) {
-	rows, err := q.db.Query(ctx, topDestPorts, arg.Ts, arg.Limit)
+	rows, err := q.db.Query(ctx, topDestPorts, arg.Limit, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -95,13 +228,13 @@ func (q *Queries) TopDestPorts(ctx context.Context, arg TopDestPortsParams) ([]T
 const topSignatures = `-- name: TopSignatures :many
 SELECT sid, signature, count(*) AS cnt
 FROM alerts
-WHERE ts >= $1
-GROUP BY sid, signature ORDER BY cnt DESC LIMIT $2
+WHERE ($2::timestamptz IS NULL OR ts >= $2)
+GROUP BY sid, signature ORDER BY cnt DESC LIMIT $1
 `
 
 type TopSignaturesParams struct {
-	Ts    pgtype.Timestamptz `json:"ts"`
 	Limit int32              `json:"limit"`
+	Since pgtype.Timestamptz `json:"since"`
 }
 
 type TopSignaturesRow struct {
@@ -111,7 +244,7 @@ type TopSignaturesRow struct {
 }
 
 func (q *Queries) TopSignatures(ctx context.Context, arg TopSignaturesParams) ([]TopSignaturesRow, error) {
-	rows, err := q.db.Query(ctx, topSignatures, arg.Ts, arg.Limit)
+	rows, err := q.db.Query(ctx, topSignatures, arg.Limit, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +266,13 @@ func (q *Queries) TopSignatures(ctx context.Context, arg TopSignaturesParams) ([
 const topSrcIPs = `-- name: TopSrcIPs :many
 SELECT src_ip, count(*) AS cnt
 FROM alerts
-WHERE ts >= $1
-GROUP BY src_ip ORDER BY cnt DESC LIMIT $2
+WHERE ($2::timestamptz IS NULL OR ts >= $2)
+GROUP BY src_ip ORDER BY cnt DESC LIMIT $1
 `
 
 type TopSrcIPsParams struct {
-	Ts    pgtype.Timestamptz `json:"ts"`
 	Limit int32              `json:"limit"`
+	Since pgtype.Timestamptz `json:"since"`
 }
 
 type TopSrcIPsRow struct {
@@ -148,7 +281,7 @@ type TopSrcIPsRow struct {
 }
 
 func (q *Queries) TopSrcIPs(ctx context.Context, arg TopSrcIPsParams) ([]TopSrcIPsRow, error) {
-	rows, err := q.db.Query(ctx, topSrcIPs, arg.Ts, arg.Limit)
+	rows, err := q.db.Query(ctx, topSrcIPs, arg.Limit, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -168,19 +301,19 @@ func (q *Queries) TopSrcIPs(ctx context.Context, arg TopSrcIPsParams) ([]TopSrcI
 }
 
 const trendByHour = `-- name: TrendByHour :many
-SELECT date_trunc('hour', ts) AS bucket, count(*) AS cnt
+SELECT date_trunc('hour', ts)::timestamptz AS bucket, count(*) AS cnt
 FROM alerts
-WHERE ts >= $1
+WHERE ($1::timestamptz IS NULL OR ts >= $1)
 GROUP BY bucket ORDER BY bucket
 `
 
 type TrendByHourRow struct {
-	Bucket pgtype.Interval `json:"bucket"`
-	Cnt    int64           `json:"cnt"`
+	Bucket pgtype.Timestamptz `json:"bucket"`
+	Cnt    int64              `json:"cnt"`
 }
 
-func (q *Queries) TrendByHour(ctx context.Context, ts pgtype.Timestamptz) ([]TrendByHourRow, error) {
-	rows, err := q.db.Query(ctx, trendByHour, ts)
+func (q *Queries) TrendByHour(ctx context.Context, since pgtype.Timestamptz) ([]TrendByHourRow, error) {
+	rows, err := q.db.Query(ctx, trendByHour, since)
 	if err != nil {
 		return nil, err
 	}
