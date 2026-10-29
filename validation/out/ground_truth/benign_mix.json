@@ -2,7 +2,7 @@
   "pcap": "benign_mix.pcap",
   "scenario": "benign_mixed_traffic",
   "benign": true,
-  "description": "正常 DNS(80)+HTTP(60)+TCP SYN(20)，无攻击特征",
+  "description": "正常业务基线：DNS(600)+HTTP 会话(400)+TLS 握手(100)+低频 SSH(5)，共约 3600 包",
   "expected_alerts": [],
   "known_limitations": []
 }

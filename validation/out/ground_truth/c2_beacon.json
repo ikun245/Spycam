@@ -1,0 +1,25 @@
+{
+  "pcap": "c2_beacon.pcap",
+  "scenario": "c2_beacon",
+  "benign": false,
+  "description": "10.0.0.100 向 198.51.100.10 固定路径 POST 心跳（40 次/80s）",
+  "expected_alerts": [
+    {
+      "sid": 1000006,
+      "msg": "SPYCAM C2 beacon fixed path POST burst",
+      "src_ip": "10.0.0.100",
+      "dst_ip": "198.51.100.10",
+      "dst_port_range": [
+        80,
+        80
+      ],
+      "proto": "TCP",
+      "window": {
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-01T00:01:30Z"
+      },
+      "min_count": 1
+    }
+  ],
+  "known_limitations": []
+}

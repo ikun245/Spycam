@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-10-29T10:55:01.523952+00:00",
+  "generated_at": "2026-10-29T12:34:32.518239+00:00",
   "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
   "overall": {
-    "tp": 5,
+    "tp": 6,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
@@ -13,7 +13,7 @@
       "scenario": "benign_mixed_traffic",
       "pcap": "benign_mix.pcap",
       "benign": true,
-      "task_id": "d21e231c-6b3a-4668-9929-e2a8ff6a1701",
+      "task_id": "9a96f440-c7ea-41f6-8015-178cfe14890b",
       "task_status": "done",
       "alert_count": 0,
       "tp": 0,
@@ -26,10 +26,32 @@
       "fp_samples": []
     },
     {
+      "scenario": "c2_beacon",
+      "pcap": "c2_beacon.pcap",
+      "benign": false,
+      "task_id": "5ecb4bf1-3524-4e13-b265-1596d531d6e7",
+      "task_status": "done",
+      "alert_count": 20,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "expectations": [
+        {
+          "sid": 1000006,
+          "matched": 20,
+          "min_count": 1
+        }
+      ],
+      "fp_samples": []
+    },
+    {
       "scenario": "dns_tunnel",
       "pcap": "dns_tunnel.pcap",
       "benign": false,
-      "task_id": "44706174-05ca-4266-be7e-10170ca34853",
+      "task_id": "c5ebfb56-9bb9-47ff-bc69-fa2802c084f9",
       "task_status": "done",
       "alert_count": 120,
       "tp": 1,
@@ -51,7 +73,7 @@
       "scenario": "syn_port_scan",
       "pcap": "scan_syn.pcap",
       "benign": false,
-      "task_id": "77560680-cd94-4bdf-9a74-53f7e67ad7fa",
+      "task_id": "78a06b0e-508a-4571-b0ab-f3e45c8bcf99",
       "task_status": "done",
       "alert_count": 78,
       "tp": 1,
@@ -63,7 +85,7 @@
       "expectations": [
         {
           "sid": 1000001,
-          "matched": 76,
+          "matched": 75,
           "min_count": 1
         }
       ],
@@ -73,7 +95,7 @@
       "scenario": "ssh_bruteforce",
       "pcap": "ssh_bruteforce.pcap",
       "benign": false,
-      "task_id": "507cafd5-32fc-4860-9fc2-4a9497d16222",
+      "task_id": "068274f0-6467-45bd-98a8-93fda902c223",
       "task_status": "done",
       "alert_count": 30,
       "tp": 1,
@@ -95,7 +117,7 @@
       "scenario": "web_sqli_xss",
       "pcap": "web_attacks.pcap",
       "benign": false,
-      "task_id": "8120cc95-a4c5-41a8-be30-aa42b0a79ec6",
+      "task_id": "835cc84c-2f1a-4351-aad8-cf65a13eb14b",
       "task_status": "done",
       "alert_count": 180,
       "tp": 2,
@@ -126,12 +148,10 @@
       "pcap": "variant_slow_scan.pcap",
       "prediction": "hit",
       "prediction_reason": "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。",
-      "actual_alert_count": 59,
-      "actual": "hit",
-      "prediction_correct": true,
-      "sids": [
-        1000001
-      ]
+      "actual_alert_count": 0,
+      "actual": "miss",
+      "prediction_correct": false,
+      "sids": []
     },
     {
       "scenario": "variant_ssh_alt_port",

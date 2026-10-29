@@ -199,33 +199,83 @@ def gen_dns_tunnel():
     }
 
 
+def gen_c2_beacon():
+    """C2 心跳：受控主机向外部固定路径高频 POST（规则 1000006：60s 内 ≥10 次）。"""
+    pkts = []
+    C2_SERVER = "198.51.100.10"
+    sport = 46000
+    idx = 0
+    for i in range(40):
+        pkts.extend(
+            http_flow(
+                CLIENT, C2_SERVER, sport, 80, "/api/collect",
+                method="POST", host="cdn-metrics.example.com", t=ts(i, step=2.0),
+            )
+        )
+        sport += 1
+        idx += 1
+    return pkts, {
+        "pcap": "c2_beacon.pcap",
+        "scenario": "c2_beacon",
+        "benign": False,
+        "description": f"{CLIENT} 向 {C2_SERVER} 固定路径 POST 心跳（40 次/80s）",
+        "expected_alerts": [
+            {
+                "sid": 1000006,
+                "msg": "SPYCAM C2 beacon fixed path POST burst",
+                "src_ip": CLIENT,
+                "dst_ip": C2_SERVER,
+                "dst_port_range": [80, 80],
+                "proto": "TCP",
+                "window": {"start": epoch_to_iso(BASE), "end": epoch_to_iso(BASE + 90)},
+                "min_count": 1,
+            }
+        ],
+        "known_limitations": [],
+    }
+
+
 def gen_benign_mix():
     """负样本：正常 DNS + 正常 HTTP（不含攻击特征）。"""
     pkts = []
-    for i in range(80):
+    # 正常 DNS 业务（600 次，多域名轮询）
+    for i in range(600):
         p = (
             IP(src=CLIENT, dst=DNS_SERVER)
             / UDP(sport=RandShort(), dport=53)
-            / DNS(rd=1, qd=DNSQR(qname=f"www{i % 7}.example.com"))
+            / DNS(rd=1, qd=DNSQR(qname=f"svc{i % 23}.example.com"))
         )
-        p.time = ts(i, step=0.3)
+        p.time = ts(i, step=0.05)
         pkts.append(p)
-    for i in range(60):
+    # 正常 HTTP 浏览业务（400 个完整会话）
+    uris_benign = [
+        "/products/item?id={i}",
+        "/static/js/app.{i}.js",
+        "/api/v1/orders/{i}",
+        "/images/banner.{i}.png",
+    ]
+    sport = 50000
+    for i in range(400):
+        uri = uris_benign[i % 4].format(i=i)
         pkts.extend(
-            http_flow(CLIENT, VICTIM, 50000 + i, 80, f"/products/item?id={i}", t=ts(100 + i, step=0.3))
+            http_flow(CLIENT, VICTIM, sport, 80, uri, t=ts(700 + i, step=0.05))
         )
-    for i in range(20):
-        p = (
-            IP(src=CLIENT, dst=VICTIM)
-            / TCP(sport=RandShort(), dport=443, flags="S")
-        )
-        p.time = ts(200 + i, step=0.5)
+        sport += 1
+    # 正常 HTTPS 握手（100 次，注意目的端口避开扫描规则的 1-200 段）
+    for i in range(100):
+        p = IP(src=CLIENT, dst=VICTIM) / TCP(sport=RandShort(), dport=443, flags="S")
+        p.time = ts(1200 + i, step=0.1)
+        pkts.append(p)
+    # 正常内网 SSH 管理（少量、低频，不触发爆破阈值 10 次/60s）
+    for i in range(5):
+        p = IP(src=CLIENT, dst=VICTIM) / TCP(sport=RandShort(), dport=22, flags="S")
+        p.time = ts(1400 + i * 20, step=0.1)
         pkts.append(p)
     return pkts, {
         "pcap": "benign_mix.pcap",
         "scenario": "benign_mixed_traffic",
         "benign": True,
-        "description": "正常 DNS(80)+HTTP(60)+TCP SYN(20)，无攻击特征",
+        "description": "正常业务基线：DNS(600)+HTTP 会话(400)+TLS 握手(100)+低频 SSH(5)，共约 3600 包",
         "expected_alerts": [],
         "known_limitations": [],
     }
@@ -329,6 +379,7 @@ GENS = {
     "ssh_bruteforce": gen_ssh_bruteforce,
     "web_attacks": gen_web_attacks,
     "dns_tunnel": gen_dns_tunnel,
+    "c2_beacon": gen_c2_beacon,
     "benign_mix": gen_benign_mix,
 }
 
