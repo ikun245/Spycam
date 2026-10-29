@@ -59,7 +59,7 @@ func (q *Queries) GetIncident(ctx context.Context, id int64) (Incident, error) {
 }
 
 const latestEngineStat = `-- name: LatestEngineStat :one
-SELECT ts, uptime_sec, rules_loaded, rule_load_ms, kernel_drops, alerts_per_min FROM engine_stats ORDER BY ts DESC LIMIT 1
+SELECT ts, uptime_sec, rules_loaded, rule_load_ms, kernel_drops, alerts_per_min, alerts_total, rules_failed FROM engine_stats ORDER BY ts DESC LIMIT 1
 `
 
 func (q *Queries) LatestEngineStat(ctx context.Context) (EngineStat, error) {
@@ -72,6 +72,8 @@ func (q *Queries) LatestEngineStat(ctx context.Context) (EngineStat, error) {
 		&i.RuleLoadMs,
 		&i.KernelDrops,
 		&i.AlertsPerMin,
+		&i.AlertsTotal,
+		&i.RulesFailed,
 	)
 	return i, err
 }

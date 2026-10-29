@@ -69,11 +69,16 @@ func (s *Server) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 			_ = rules.GenerateActiveFile(s.cfg.RulesActiveDir, rows2)
 		}
 		slog.Warn("rule reload failed, rolled back", "sid", sid, "err", err)
+		s.audit(r.Context(), actor(r), auditRuleToggle, strconv.FormatInt(sid, 10),
+			map[string]any{"enabled": *req.Enabled, "result": "rolled_back", "error": err.Error()})
 		writeErr(w, http.StatusBadGateway, "reload failed, change rolled back")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"sid": sid, "enabled": *req.Enabled, "reloaded": true})
+	version := s.recordRuleRevision(r.Context(), actor(r), map[string]any{"op": "toggle", "sid": sid, "enabled": *req.Enabled})
+	s.audit(r.Context(), actor(r), auditRuleToggle, strconv.FormatInt(sid, 10),
+		map[string]any{"enabled": *req.Enabled, "result": "applied", "ruleset_version": version})
+	writeJSON(w, http.StatusOK, map[string]any{"sid": sid, "enabled": *req.Enabled, "reloaded": true, "ruleset_version": version})
 }
 
 // handleGetAlertRaw 返回告警原始 JSON 与规则原文（M4 详情）。

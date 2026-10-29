@@ -13,20 +13,43 @@ import (
 
 const countAlerts = `-- name: CountAlerts :one
 SELECT count(*)
-FROM alerts
-WHERE ($1::uuid IS NULL OR task_id = $1)
-  AND ($2::bigint IS NULL OR sid = $2)
-  AND ($3::text IS NULL OR src_ip = $3)
+FROM alerts a
+LEFT JOIN alert_groups g ON g.id = a.group_id
+WHERE ($1::uuid IS NULL OR a.task_id = $1)
+  AND ($2::bigint IS NULL OR a.sid = $2)
+  AND ($3::text IS NULL OR a.src_ip = $3)
+  AND ($4::text IS NULL OR a.dest_ip = $4)
+  AND ($5::int IS NULL OR a.severity = $5)
+  AND ($6::text IS NULL OR a.proto = $6)
+  AND ($7::text IS NULL OR COALESCE(g.status, 'new') = $7)
+  AND ($8::timestamptz IS NULL OR a.ts >= $8)
+  AND ($9::timestamptz IS NULL OR a.ts <= $9)
 `
 
 type CountAlertsParams struct {
-	TaskID *string     `json:"task_id"`
-	Sid    pgtype.Int8 `json:"sid"`
-	SrcIp  pgtype.Text `json:"src_ip"`
+	TaskID       *string            `json:"task_id"`
+	Sid          pgtype.Int8        `json:"sid"`
+	SrcIp        pgtype.Text        `json:"src_ip"`
+	DestIp       pgtype.Text        `json:"dest_ip"`
+	Severity     pgtype.Int4        `json:"severity"`
+	Proto        pgtype.Text        `json:"proto"`
+	TriageStatus pgtype.Text        `json:"triage_status"`
+	TsFrom       pgtype.Timestamptz `json:"ts_from"`
+	TsTo         pgtype.Timestamptz `json:"ts_to"`
 }
 
 func (q *Queries) CountAlerts(ctx context.Context, arg CountAlertsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAlerts, arg.TaskID, arg.Sid, arg.SrcIp)
+	row := q.db.QueryRow(ctx, countAlerts,
+		arg.TaskID,
+		arg.Sid,
+		arg.SrcIp,
+		arg.DestIp,
+		arg.Severity,
+		arg.Proto,
+		arg.TriageStatus,
+		arg.TsFrom,
+		arg.TsTo,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -168,47 +191,83 @@ func (q *Queries) GetFlow(ctx context.Context, arg GetFlowParams) (Flow, error) 
 }
 
 const listAlerts = `-- name: ListAlerts :many
-SELECT id, task_id, ts, src_ip, src_port, dest_ip, dest_port, proto, app_proto,
-       sid, signature, severity, category
-FROM alerts
-WHERE ($3::uuid IS NULL OR task_id = $3)
-  AND ($4::bigint IS NULL OR sid = $4)
-  AND ($5::text IS NULL OR src_ip = $5)
-ORDER BY ts DESC
-LIMIT $1 OFFSET $2
+SELECT a.id, a.task_id, a.ts, a.src_ip, a.src_port, a.dest_ip, a.dest_port, a.proto, a.app_proto,
+       a.sid, a.signature, a.severity, a.category,
+       COALESCE(g.status, 'new')::text AS triage_status
+FROM alerts a
+LEFT JOIN alert_groups g ON g.id = a.group_id
+WHERE ($1::uuid IS NULL OR a.task_id = $1)
+  AND ($2::bigint IS NULL OR a.sid = $2)
+  AND ($3::text IS NULL OR a.src_ip = $3)
+  AND ($4::text IS NULL OR a.dest_ip = $4)
+  AND ($5::int IS NULL OR a.severity = $5)
+  AND ($6::text IS NULL OR a.proto = $6)
+  AND ($7::text IS NULL OR COALESCE(g.status, 'new') = $7)
+  AND ($8::timestamptz IS NULL OR a.ts >= $8)
+  AND ($9::timestamptz IS NULL OR a.ts <= $9)
+ORDER BY
+  CASE WHEN $10::text = 'ts' AND NOT $11::bool THEN a.ts END ASC,
+  CASE WHEN $10::text = 'ts' AND $11::bool THEN a.ts END DESC,
+  CASE WHEN $10::text = 'severity' AND NOT $11::bool THEN a.severity END ASC,
+  CASE WHEN $10::text = 'severity' AND $11::bool THEN a.severity END DESC,
+  CASE WHEN $10::text = 'sid' AND NOT $11::bool THEN a.sid END ASC,
+  CASE WHEN $10::text = 'sid' AND $11::bool THEN a.sid END DESC,
+  CASE WHEN $10::text = 'src_ip' AND NOT $11::bool THEN a.src_ip END ASC,
+  CASE WHEN $10::text = 'src_ip' AND $11::bool THEN a.src_ip END DESC,
+  CASE WHEN $10::text = 'dest_ip' AND NOT $11::bool THEN a.dest_ip END ASC,
+  CASE WHEN $10::text = 'dest_ip' AND $11::bool THEN a.dest_ip END DESC,
+  a.id DESC
+LIMIT $12 OFFSET $13
 `
 
 type ListAlertsParams struct {
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-	TaskID *string     `json:"task_id"`
-	Sid    pgtype.Int8 `json:"sid"`
-	SrcIp  pgtype.Text `json:"src_ip"`
+	TaskID       *string            `json:"task_id"`
+	Sid          pgtype.Int8        `json:"sid"`
+	SrcIp        pgtype.Text        `json:"src_ip"`
+	DestIp       pgtype.Text        `json:"dest_ip"`
+	Severity     pgtype.Int4        `json:"severity"`
+	Proto        pgtype.Text        `json:"proto"`
+	TriageStatus pgtype.Text        `json:"triage_status"`
+	TsFrom       pgtype.Timestamptz `json:"ts_from"`
+	TsTo         pgtype.Timestamptz `json:"ts_to"`
+	SortKey      string             `json:"sort_key"`
+	SortDesc     bool               `json:"sort_desc"`
+	PageLimit    int32              `json:"page_limit"`
+	PageOffset   int32              `json:"page_offset"`
 }
 
 type ListAlertsRow struct {
-	ID        int64              `json:"id"`
-	TaskID    string             `json:"task_id"`
-	Ts        pgtype.Timestamptz `json:"ts"`
-	SrcIp     string             `json:"src_ip"`
-	SrcPort   pgtype.Int4        `json:"src_port"`
-	DestIp    string             `json:"dest_ip"`
-	DestPort  pgtype.Int4        `json:"dest_port"`
-	Proto     pgtype.Text        `json:"proto"`
-	AppProto  pgtype.Text        `json:"app_proto"`
-	Sid       int64              `json:"sid"`
-	Signature pgtype.Text        `json:"signature"`
-	Severity  pgtype.Int4        `json:"severity"`
-	Category  pgtype.Text        `json:"category"`
+	ID           int64              `json:"id"`
+	TaskID       string             `json:"task_id"`
+	Ts           pgtype.Timestamptz `json:"ts"`
+	SrcIp        string             `json:"src_ip"`
+	SrcPort      pgtype.Int4        `json:"src_port"`
+	DestIp       string             `json:"dest_ip"`
+	DestPort     pgtype.Int4        `json:"dest_port"`
+	Proto        pgtype.Text        `json:"proto"`
+	AppProto     pgtype.Text        `json:"app_proto"`
+	Sid          int64              `json:"sid"`
+	Signature    pgtype.Text        `json:"signature"`
+	Severity     pgtype.Int4        `json:"severity"`
+	Category     pgtype.Text        `json:"category"`
+	TriageStatus string             `json:"triage_status"`
 }
 
 func (q *Queries) ListAlerts(ctx context.Context, arg ListAlertsParams) ([]ListAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listAlerts,
-		arg.Limit,
-		arg.Offset,
 		arg.TaskID,
 		arg.Sid,
 		arg.SrcIp,
+		arg.DestIp,
+		arg.Severity,
+		arg.Proto,
+		arg.TriageStatus,
+		arg.TsFrom,
+		arg.TsTo,
+		arg.SortKey,
+		arg.SortDesc,
+		arg.PageLimit,
+		arg.PageOffset,
 	)
 	if err != nil {
 		return nil, err
@@ -231,6 +290,7 @@ func (q *Queries) ListAlerts(ctx context.Context, arg ListAlertsParams) ([]ListA
 			&i.Signature,
 			&i.Severity,
 			&i.Category,
+			&i.TriageStatus,
 		); err != nil {
 			return nil, err
 		}

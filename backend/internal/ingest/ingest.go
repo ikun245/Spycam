@@ -224,12 +224,15 @@ func processLine(ctx context.Context, q *gen.Queries, taskID string, line []byte
 		if ev.Stats == nil {
 			return nil
 		}
+		loaded, failed := ev.Stats.RulesLoaded()
+		// rule_load_ms 不在 stats 事件里，由 engine-agent 记录最近一次校验+重载耗时
 		return q.CreateEngineStat(ctx, gen.CreateEngineStatParams{
-			Ts:           ts,
-			UptimeSec:    int8Ptr(&ev.Stats.Uptime),
-			RuleLoadMs:   int8Ptr(&ev.Stats.RuleReload),
-			KernelDrops:  int8Ptr(&ev.Stats.KernelPackets.Dropped),
-			AlertsPerMin: int8Ptr(&ev.Stats.Detect.Alerts),
+			Ts:          ts,
+			UptimeSec:   int8Ptr(&ev.Stats.Uptime),
+			RulesLoaded: int8Ptr(loaded),
+			KernelDrops: int8Ptr(ev.Stats.KernelDrops()),
+			AlertsTotal: int8Ptr(ev.Stats.Detect.Alert),
+			RulesFailed: int8Ptr(failed),
 		})
 	default:
 		return nil // 其余类型只计数

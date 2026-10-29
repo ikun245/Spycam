@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -73,6 +75,10 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SrcIP == "" || req.SrcPort == "" || req.DstIP == "" || req.DstPort == "" {
 		writeErr(w, http.StatusBadRequest, "src_ip/src_port/dst_ip/dst_port 必填")
+		return
+	}
+	if err := validateRuleHeaderFields(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Severity < 1 || req.Severity > 3 {
@@ -148,13 +154,54 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.regenerateAndReload(r); err != nil {
-		// 回滚刚插入的规则
+		// 回滚：禁用刚插入的规则并重新生成规则文件，否则坏规则留在 rules-active 里会让后续每次重载都失败
 		_ = gen.New(s.pool).SetRuleEnabled(r.Context(), gen.SetRuleEnabledParams{Sid: created.Sid, Enabled: false})
+		if enabled, lerr := gen.New(s.pool).ListEnabledRules(r.Context()); lerr == nil {
+			_ = rules.GenerateActiveFile(s.cfg.RulesActiveDir, enabled)
+		}
+		s.audit(r.Context(), actor(r), auditRuleCreate, strconv.FormatInt(created.Sid, 10),
+			map[string]any{"raw": raw, "result": "rolled_back", "error": err.Error()})
 		writeErr(w, http.StatusBadGateway, "引擎校验/重载失败，规则已回滚: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{"sid": created.Sid, "raw": raw, "reloaded": true})
+	version := s.recordRuleRevision(r.Context(), actor(r), map[string]any{"op": "create", "sid": created.Sid})
+	s.audit(r.Context(), actor(r), auditRuleCreate, strconv.FormatInt(created.Sid, 10),
+		map[string]any{"raw": raw, "result": "applied", "ruleset_version": version})
+	writeJSON(w, http.StatusCreated, map[string]any{"sid": created.Sid, "raw": raw, "reloaded": true, "ruleset_version": version})
+}
+
+// 规则头与 metadata 字段格式白名单（架构设计 §10 规则内容注入防护）：
+// 这些字段直接拼进规则文本，若含空格、分号、括号、引号可注入额外关键字或改变规则结构。
+var (
+	// 地址：any / $HOME_NET 变量 / IPv4 / IPv6 / CIDR，允许 ! 取反与 [a,b] 列表
+	ruleAddrRe = regexp.MustCompile(`^(any|!?\$[A-Z_]+|!?\[?[0-9A-Fa-f:.,/!]+\]?)$`)
+	// 端口：any / 单端口 / 范围 a:b / 列表 [a,b]，允许 ! 取反
+	rulePortRe = regexp.MustCompile(`^(any|!?\$[A-Z_]+|!?\[?[0-9:,!]+\]?)$`)
+	// metadata 值：字母数字、空格、点、连字符、下划线；不允许分号、逗号、引号、括号
+	ruleMetaRe = regexp.MustCompile(`^[A-Za-z0-9 ._-]{0,64}$`)
+)
+
+func validateRuleHeaderFields(req *createRuleRequest) error {
+	req.SrcIP, req.DstIP = strings.TrimSpace(req.SrcIP), strings.TrimSpace(req.DstIP)
+	req.SrcPort, req.DstPort = strings.TrimSpace(req.SrcPort), strings.TrimSpace(req.DstPort)
+	req.MitreTactic, req.MitreTechnique = strings.TrimSpace(req.MitreTactic), strings.TrimSpace(req.MitreTechnique)
+	for name, v := range map[string]string{"src_ip": req.SrcIP, "dst_ip": req.DstIP} {
+		if len(v) > 128 || !ruleAddrRe.MatchString(v) {
+			return fmt.Errorf("%s 格式非法：仅支持 any、$HOME_NET、IP、CIDR 或 [a,b] 列表", name)
+		}
+	}
+	for name, v := range map[string]string{"src_port": req.SrcPort, "dst_port": req.DstPort} {
+		if len(v) > 64 || !rulePortRe.MatchString(v) {
+			return fmt.Errorf("%s 格式非法：仅支持 any、端口号、范围 a:b 或 [a,b] 列表", name)
+		}
+	}
+	for name, v := range map[string]string{"mitre_tactic": req.MitreTactic, "mitre_technique": req.MitreTechnique} {
+		if !ruleMetaRe.MatchString(v) {
+			return fmt.Errorf("%s 只能包含字母、数字、空格、点、连字符、下划线（≤64 字符）", name)
+		}
+	}
+	return nil
 }
 
 // asciiFallback 把中文描述转成规则内可用的 ASCII msg：
@@ -162,7 +209,8 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 func asciiFallback(msg string, sid int64) string {
 	var b strings.Builder
 	for _, r := range msg {
-		if r >= 32 && r < 127 {
+		// 双引号/分号/反斜杠会提前结束 msg 字符串或注入新关键字，一律丢弃
+		if r >= 32 && r < 127 && r != '"' && r != ';' && r != '\\' {
 			b.WriteRune(r)
 		}
 	}

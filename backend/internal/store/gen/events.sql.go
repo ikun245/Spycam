@@ -46,18 +46,18 @@ func (q *Queries) CreateDnsEvent(ctx context.Context, arg CreateDnsEventParams) 
 }
 
 const createEngineStat = `-- name: CreateEngineStat :exec
-INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, rule_load_ms, kernel_drops, alerts_per_min)
+INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, kernel_drops, alerts_total, rules_failed)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (ts) DO NOTHING
 `
 
 type CreateEngineStatParams struct {
-	Ts           pgtype.Timestamptz `json:"ts"`
-	UptimeSec    pgtype.Int8        `json:"uptime_sec"`
-	RulesLoaded  pgtype.Int8        `json:"rules_loaded"`
-	RuleLoadMs   pgtype.Int8        `json:"rule_load_ms"`
-	KernelDrops  pgtype.Int8        `json:"kernel_drops"`
-	AlertsPerMin pgtype.Int8        `json:"alerts_per_min"`
+	Ts          pgtype.Timestamptz `json:"ts"`
+	UptimeSec   pgtype.Int8        `json:"uptime_sec"`
+	RulesLoaded pgtype.Int8        `json:"rules_loaded"`
+	KernelDrops pgtype.Int8        `json:"kernel_drops"`
+	AlertsTotal pgtype.Int8        `json:"alerts_total"`
+	RulesFailed pgtype.Int8        `json:"rules_failed"`
 }
 
 func (q *Queries) CreateEngineStat(ctx context.Context, arg CreateEngineStatParams) error {
@@ -65,9 +65,9 @@ func (q *Queries) CreateEngineStat(ctx context.Context, arg CreateEngineStatPara
 		arg.Ts,
 		arg.UptimeSec,
 		arg.RulesLoaded,
-		arg.RuleLoadMs,
 		arg.KernelDrops,
-		arg.AlertsPerMin,
+		arg.AlertsTotal,
+		arg.RulesFailed,
 	)
 	return err
 }

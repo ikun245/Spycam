@@ -4,11 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,6 +79,8 @@ func (s *Server) handleUploadPcap(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "db insert failed")
 		return
 	}
+	s.audit(r.Context(), actor(r), auditPcapUpload, id.String(),
+		map[string]any{"name": sanitizeName(r.FormValue("name")), "size": size})
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "size": size})
 }
 
@@ -105,48 +112,139 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "queue push failed")
 		return
 	}
+	s.audit(r.Context(), actor(r), auditTaskCreate, taskID.String(), map[string]any{"pcap_id": pcapID.String()})
 	writeJSON(w, http.StatusCreated, map[string]string{"id": taskID.String(), "status": "queued"})
 }
 
-// handleListAlerts 告警列表：过滤参数可选，排序白名单在服务端（M7）。
+// alertSortKeys 前端排序字段 → SQL CASE 分支键的白名单；不在表内的一律 400，不透传（M7）。
+var alertSortKeys = map[string]string{
+	"ts":       "ts",
+	"severity": "severity",
+	"sid":      "sid",
+	"src_ip":   "src_ip",
+	"dest_ip":  "dest_ip",
+}
+
+// alertProtos 大写输入 → eve.json 中的规范写法
+var alertProtos = map[string]string{"TCP": "TCP", "UDP": "UDP", "ICMP": "ICMP", "IPV6-ICMP": "IPv6-ICMP", "SCTP": "SCTP"}
+
+// parseAlertQuery 把查询串校验并映射为 sqlc 参数；纯函数，便于表驱动测试。
+func parseAlertQuery(v url.Values) (gen.ListAlertsParams, error) {
+	p := gen.ListAlertsParams{SortKey: "ts", SortDesc: true, PageLimit: 50}
+	if s := v.Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n <= 0 || n > 500 {
+			return p, errors.New("limit must be 1..500")
+		}
+		p.PageLimit = int32(n)
+	}
+	if s := v.Get("offset"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return p, errors.New("offset must be >= 0")
+		}
+		p.PageOffset = int32(n)
+	}
+	if s := v.Get("sort"); s != "" {
+		key, ok := alertSortKeys[s]
+		if !ok {
+			return p, errors.New("sort must be one of ts|severity|sid|src_ip|dest_ip")
+		}
+		p.SortKey = key
+	}
+	switch v.Get("order") {
+	case "", "desc":
+	case "asc":
+		p.SortDesc = false
+	default:
+		return p, errors.New("order must be asc|desc")
+	}
+	if s := v.Get("task_id"); s != "" {
+		if _, err := uuid.Parse(s); err != nil {
+			return p, errors.New("task_id must be uuid")
+		}
+		p.TaskID = &s
+	}
+	if s := v.Get("sid"); s != "" {
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || n <= 0 {
+			return p, errors.New("sid must be positive int")
+		}
+		p.Sid = pgtype.Int8{Int64: n, Valid: true}
+	}
+	for _, f := range []struct {
+		key string
+		dst *pgtype.Text
+	}{{"src_ip", &p.SrcIp}, {"dest_ip", &p.DestIp}} {
+		if s := v.Get(f.key); s != "" {
+			if net.ParseIP(s) == nil {
+				return p, fmt.Errorf("%s must be an IP address", f.key)
+			}
+			*f.dst = pgtype.Text{String: s, Valid: true}
+		}
+	}
+	if s := v.Get("severity"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > 4 {
+			return p, errors.New("severity must be 1..4")
+		}
+		p.Severity = pgtype.Int4{Int32: int32(n), Valid: true}
+	}
+	if s := v.Get("proto"); s != "" {
+		canon, ok := alertProtos[strings.ToUpper(s)]
+		if !ok {
+			return p, errors.New("proto must be TCP|UDP|ICMP|IPv6-ICMP|SCTP")
+		}
+		p.Proto = pgtype.Text{String: canon, Valid: true}
+	}
+	if s := v.Get("status"); s != "" {
+		if !validGroupStatus[s] {
+			return p, errors.New("status must be new|confirmed|false_positive|ignored")
+		}
+		p.TriageStatus = pgtype.Text{String: s, Valid: true}
+	}
+	for _, f := range []struct {
+		key string
+		dst *pgtype.Timestamptz
+	}{{"from", &p.TsFrom}, {"to", &p.TsTo}} {
+		if s := v.Get(f.key); s != "" {
+			t, err := time.Parse(time.RFC3339, s)
+			if err != nil {
+				return p, fmt.Errorf("%s must be RFC3339", f.key)
+			}
+			*f.dst = pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+	if p.TsFrom.Valid && p.TsTo.Valid && p.TsTo.Time.Before(p.TsFrom.Time) {
+		return p, errors.New("to must not be before from")
+	}
+	return p, nil
+}
+
+// handleListAlerts 告警列表：服务端过滤 + 白名单排序 + 分页（M4/M7）。
 func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
-	limit, offset := pageParams(r)
+	params, err := parseAlertQuery(r.URL.Query())
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	q := gen.New(s.pool)
-	taskID := r.URL.Query().Get("task_id")
-	sidStr := r.URL.Query().Get("sid")
-	srcIP := r.URL.Query().Get("src_ip")
-
-	filters := gen.ListAlertsParams{Limit: limit, Offset: offset}
-	if taskID != "" {
-		if _, err := uuid.Parse(taskID); err != nil {
-			writeErr(w, http.StatusBadRequest, "task_id must be uuid")
-			return
-		}
-		filters.TaskID = &taskID
-	}
-	if sidStr != "" {
-		v, err := strconv.ParseInt(sidStr, 10, 64)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "sid must be int")
-			return
-		}
-		filters.Sid = pgtype.Int8{Int64: v, Valid: true}
-	}
-	if srcIP != "" {
-		filters.SrcIp = pgtype.Text{String: srcIP, Valid: true}
-	}
-
-	countFilters := gen.CountAlertsParams{
-		TaskID: filters.TaskID,
-		Sid:    filters.Sid,
-		SrcIp:  filters.SrcIp,
-	}
-	rows, err := q.ListAlerts(r.Context(), filters)
+	rows, err := q.ListAlerts(r.Context(), params)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	total, err := q.CountAlerts(r.Context(), countFilters)
+	total, err := q.CountAlerts(r.Context(), gen.CountAlertsParams{
+		TaskID:       params.TaskID,
+		Sid:          params.Sid,
+		SrcIp:        params.SrcIp,
+		DestIp:       params.DestIp,
+		Severity:     params.Severity,
+		Proto:        params.Proto,
+		TriageStatus: params.TriageStatus,
+		TsFrom:       params.TsFrom,
+		TsTo:         params.TsTo,
+	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "query failed")
 		return

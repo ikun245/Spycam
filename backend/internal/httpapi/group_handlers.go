@@ -100,5 +100,7 @@ func (s *Server) handleTriageGroup(w http.ResponseWriter, r *http.Request) {
 		// 审计失败不阻断主流程，但记录日志
 		slog.Warn("triage audit write failed", "group_id", id, "err", err)
 	}
+	s.audit(r.Context(), identity.Username, auditGroupTriage, strconv.FormatInt(id, 10),
+		map[string]any{"from": old.Status, "to": req.Status, "note": req.Note})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": req.Status})
 }

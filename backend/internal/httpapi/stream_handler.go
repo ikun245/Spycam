@@ -3,14 +3,15 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"spycam/backend/internal/realtime"
 )
 
-// handleStream SSE 实时推送（C1）：新告警组、任务状态变化。
-// 事件格式：event: alert / data: {json}
+// handleStream SSE 实时推送（C1）：任务状态变化与新增告警统计。
+// 事件格式：event: task / data: {realtime.Event JSON}；每 25 秒发注释心跳，防止代理断开空闲连接。
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
@@ -24,21 +25,27 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	msgs := make(chan *redis.Message, 16)
 	ctx := r.Context()
-	go realtime.Subscribe(ctx, s.rdb, msgs)
+	realtime.Subscribe(ctx, s.rdb, msgs)
 
-	// 初始注释行，触发浏览器 EventSource onopen
-	fmt.Fprint(w, ": connected\n\n")
+	// retry 告诉浏览器断线 3 秒后重连；初始注释行触发 EventSource onopen
+	fmt.Fprint(w, "retry: 3000\n: connected\n\n")
 	fl.Flush()
 
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
 		case msg, ok := <-msgs:
 			if !ok {
 				return
 			}
-			fmt.Fprintf(w, "event: alert\ndata: %s\n\n", msg.Payload)
+			// payload 由 worker 经 json.Marshal 生成，不含换行，可直接作为单行 data
+			fmt.Fprintf(w, "event: task\ndata: %s\n\n", msg.Payload)
 			fl.Flush()
 		}
 	}

@@ -13,16 +13,17 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// Status 是引擎运行状态的只读视图。
+// Status 是引擎运行状态的只读视图。未测得的字段省略（omitempty），避免前端把“未知”显示成 0。
 type Status struct {
 	Running     bool   `json:"running"`
-	RuleLoadMs  int64  `json:"rule_load_ms"`
-	RulesLoaded int64  `json:"rules_loaded"`
-	KernelDrops int64  `json:"kernel_drops"`
-	Version     string `json:"version"`
+	RuleLoadMs  int64  `json:"rule_load_ms,omitempty"`
+	RulesLoaded int64  `json:"rules_loaded,omitempty"`
+	KernelDrops int64  `json:"kernel_drops,omitempty"`
+	Version     string `json:"version,omitempty"`
 }
 
 // AgentServer 是 engine-agent 的 HTTP 服务端，仅内部网络监听，靠共享 token 鉴权（M7）。
@@ -30,6 +31,8 @@ type AgentServer struct {
 	token     string
 	suriBin   string
 	socketPat string
+	// lastReloadMs 最近一次「suricata -T 校验 + 热重载」耗时；0 表示自 agent 启动后未重载过
+	lastReloadMs atomic.Int64
 }
 
 // NewAgentServer 构造 agent 服务端。
@@ -79,7 +82,7 @@ func (a *AgentServer) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (a *AgentServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	// Close immediately: an idle client can block Suricata's command socket.
-	st := Status{}
+	st := Status{RuleLoadMs: a.lastReloadMs.Load()}
 	conn, err := net.DialTimeout("unix", a.socketPat, time.Second)
 	if err == nil {
 		_ = conn.Close()
@@ -151,10 +154,12 @@ func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	elapsed := time.Since(start).Milliseconds()
+	a.lastReloadMs.Store(max(elapsed, 1))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"validated":  true,
 		"reloaded":   true,
-		"elapsed_ms": time.Since(start).Milliseconds(),
+		"elapsed_ms": elapsed,
 	})
 }
 

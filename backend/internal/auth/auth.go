@@ -16,13 +16,21 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const sessionPrefix = "sess:"
+const (
+	sessionPrefix   = "sess:"
+	loginFailPrefix = "loginfail:"
+	// 同一用户名 15 分钟内连续失败 5 次即锁定，锁定期内不再校验密码（防在线爆破）
+	maxLoginFailures = 5
+	loginLockWindow  = 15 * time.Minute
+)
 
 var (
 	// ErrUnauthorized 会话缺失或已过期。
 	ErrUnauthorized = errors.New("unauthorized")
 	// ErrForbidden 角色权限不足。
 	ErrForbidden = errors.New("forbidden")
+	// ErrLocked 登录失败次数过多，暂时锁定。
+	ErrLocked = errors.New("too many failed attempts")
 )
 
 // Service 管理会话与密码校验。
@@ -38,18 +46,22 @@ func NewService(pool *pgxpool.Pool, rdb *redis.Client, sessionTTL time.Duration)
 }
 
 // Login 校验用户名密码，成功返回会话 ID（存 Redis，TTL 到期自动失效）。
+// 失败计数按用户名存 Redis，达到阈值后返回 ErrLocked，直到窗口过期。
 func (s *Service) Login(ctx context.Context, username, password string) (sessionID, role string, err error) {
+	failKey := loginFailPrefix + strings.ToLower(username)
+	if n, _ := s.rdb.Get(ctx, failKey).Int(); n >= maxLoginFailures {
+		return "", "", ErrLocked
+	}
 	var hash string
 	qerr := s.pool.QueryRow(ctx,
 		`SELECT password_hash, role FROM users WHERE username = $1`, username,
 	).Scan(&hash, &role)
-	if qerr != nil {
-		// 统一返回未授权，不区分“用户不存在”与“密码错误”
+	// 统一返回未授权，不区分“用户不存在”与“密码错误”；两种情况都计入失败次数
+	if qerr != nil || !verifyArgon2id(password, hash) {
+		s.recordLoginFailure(ctx, failKey)
 		return "", "", ErrUnauthorized
 	}
-	if !verifyArgon2id(password, hash) {
-		return "", "", ErrUnauthorized
-	}
+	_ = s.rdb.Del(ctx, failKey).Err()
 	sid, err := newSessionID()
 	if err != nil {
 		return "", "", fmt.Errorf("generate session: %w", err)
@@ -63,6 +75,18 @@ func (s *Service) Login(ctx context.Context, username, password string) (session
 // Logout 删除会话。
 func (s *Service) Logout(ctx context.Context, sessionID string) {
 	_ = s.rdb.Del(ctx, sessionPrefix+sessionID).Err()
+}
+
+// recordLoginFailure 失败计数 +1；窗口从第一次失败开始计时（仅首次设置过期）。
+func (s *Service) recordLoginFailure(ctx context.Context, failKey string) {
+	n, err := s.rdb.Incr(ctx, failKey).Result()
+	if err != nil {
+		slog.Warn("login failure counter", "err", err)
+		return
+	}
+	if n == 1 {
+		_ = s.rdb.Expire(ctx, failKey, loginLockWindow).Err()
+	}
 }
 
 // Identity 是请求上下文中的用户身份。
@@ -110,11 +134,12 @@ func FromContext(ctx context.Context) (Identity, bool) {
 }
 
 // HashPassword 生成 argon2id 哈希（PHC 字符串格式）。
+// 参数 m=19MiB,t=1,p=2；PHC 串里的参数须与实际计算一致（verifyArgon2id 使用同一组固定参数）。
 func HashPassword(password string) string {
 	salt := make([]byte, 16)
 	_, _ = rand.Read(salt)
 	key := argon2.IDKey([]byte(password), salt, 1, 19*1024, 2, 32)
-	return fmt.Sprintf("$argon2id$v=19$m=19456,t=2,p=2$%s$%s",
+	return fmt.Sprintf("$argon2id$v=19$m=19456,t=1,p=2$%s$%s",
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key))
 }

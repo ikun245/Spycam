@@ -104,3 +104,40 @@ func TestDedupKeyStableAndDistinct(t *testing.T) {
 		t.Fatalf("different flow_id must produce different key")
 	}
 }
+
+func TestParseStatsEvent(t *testing.T) {
+	// 结构取自 Suricata 7 pcap-file 模式真实 stats 事件（无 capture 段）
+	pcapMode := `{"timestamp":"2026-10-29T08:00:10.000000+0000","event_type":"stats","stats":{"uptime":42,` +
+		`"decoder":{"pkts":1200},"detect":{"engines":[{"id":0,"last_reload":"2026-10-29T08:00:00.000000+0000",` +
+		`"rules_loaded":36,"rules_failed":1,"rules_skipped":0}],"alert":17,"alerts_suppressed":0}}}`
+	ev, err := Parse([]byte(pcapMode))
+	if err != nil || ev.Stats == nil {
+		t.Fatalf("parse stats: %v", err)
+	}
+	if ev.Stats.Uptime != 42 {
+		t.Errorf("uptime = %d", ev.Stats.Uptime)
+	}
+	if ev.Stats.Detect.Alert == nil || *ev.Stats.Detect.Alert != 17 {
+		t.Errorf("detect.alert = %v", ev.Stats.Detect.Alert)
+	}
+	loaded, failed := ev.Stats.RulesLoaded()
+	if loaded == nil || *loaded != 36 || failed == nil || *failed != 1 {
+		t.Errorf("rules loaded/failed = %v/%v", loaded, failed)
+	}
+	if ev.Stats.KernelDrops() != nil {
+		t.Errorf("pcap 模式无 capture 段，kernel_drops 应为 nil（未上报），不能当成 0")
+	}
+
+	liveMode := `{"timestamp":"2026-10-29T08:00:10+0000","event_type":"stats","stats":{"uptime":5,` +
+		`"capture":{"kernel_packets":900,"kernel_drops":3}}}`
+	ev, err = Parse([]byte(liveMode))
+	if err != nil || ev.Stats == nil {
+		t.Fatalf("parse live stats: %v", err)
+	}
+	if d := ev.Stats.KernelDrops(); d == nil || *d != 3 {
+		t.Errorf("kernel_drops = %v", d)
+	}
+	if l, f := ev.Stats.RulesLoaded(); l != nil || f != nil {
+		t.Errorf("无 engines 段时应返回 nil，got %v/%v", l, f)
+	}
+}

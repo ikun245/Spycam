@@ -19,6 +19,7 @@ import (
 	"spycam/backend/internal/engine"
 	"spycam/backend/internal/ingest"
 	"spycam/backend/internal/incident"
+	"spycam/backend/internal/realtime"
 	"spycam/backend/internal/store/gen"
 )
 
@@ -52,6 +53,7 @@ func main() {
 	}
 
 	queries := gen.New(pool)
+	pub := realtime.NewPublisher(rdb)
 	agent := engine.NewClient(cfg.EngineAgentURL, cfg.EngineAgentToken)
 	eveRoot := os.Getenv("EVE_OUT_DIR")
 	if eveRoot == "" {
@@ -91,11 +93,11 @@ func main() {
 		if len(taskID) < 2 {
 			continue
 		}
-		runTask(ctx, queries, agent, pool, eveRoot, taskID[1], cfg.AggWindowSeconds)
+		runTask(ctx, queries, agent, pool, pub, eveRoot, taskID[1], cfg.AggWindowSeconds)
 	}
 }
 
-func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, pool *pgxpool.Pool, eveRoot, taskID string, aggWindow int) {
+func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, pool *pgxpool.Pool, pub *realtime.Publisher, eveRoot, taskID string, aggWindow int) {
 	start := time.Now()
 	slog.Info("task start", "task_id", taskID)
 
@@ -105,6 +107,11 @@ func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, po
 		return
 	}
 	_ = queries.UpdateTaskStatus(ctx, gen.UpdateTaskStatusParams{ID: taskID, Status: "running"})
+	pub.Publish(ctx, realtime.Event{Type: "task", TaskID: taskID, Status: "running"})
+	finishErr := func(ctx context.Context, queries *gen.Queries, taskID, msg string) {
+		failTask(ctx, queries, taskID, msg)
+		pub.Publish(ctx, realtime.Event{Type: "task", TaskID: taskID, Status: "failed", Error: msg})
+	}
 
 	// 1. 提交引擎回放
 	if _, err := agent.Replay(ctx, taskID, task.PcapID); err != nil {
@@ -142,13 +149,17 @@ func runTask(ctx context.Context, queries *gen.Queries, agent *engine.Client, po
 	}
 
 	// 6. 事件串联（S3）：同源 IP 告警组按时间窗归入攻击事件
+	incidents := 0
 	if n, err := incident.ChainTask(ctx, pool, taskID); err != nil {
 		slog.Warn("incident chain failed", "task_id", taskID, "err", err)
 	} else {
+		incidents = n
 		slog.Info("incidents chained", "task_id", taskID, "incidents", n)
 	}
 
 	_ = queries.FinishTask(ctx, gen.FinishTaskParams{ID: taskID, Status: "done", Error: pgtext("")})
+	pub.Publish(ctx, realtime.Event{Type: "task", TaskID: taskID, Status: "done",
+		Alerts: res.Alerts, Incidents: incidents})
 	slog.Info("task done", "task_id", taskID,
 		"elapsed_ms", time.Since(start).Milliseconds(),
 		"events", res.Events, "alerts", res.Alerts, "skipped", res.Skipped)
@@ -174,7 +185,7 @@ func waitReplayDone(ctx context.Context, agent *engine.Client, taskID string, ti
 	return fmt.Errorf("replay not finished within %s", timeout)
 }
 
-func finishErr(ctx context.Context, queries *gen.Queries, taskID, msg string) {
+func failTask(ctx context.Context, queries *gen.Queries, taskID, msg string) {
 	slog.Error("task failed", "task_id", taskID, "err", msg)
 	_ = queries.FinishTask(ctx, gen.FinishTaskParams{ID: taskID, Status: "failed", Error: pgtext(msg)})
 }

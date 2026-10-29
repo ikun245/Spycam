@@ -25,6 +25,6 @@ INSERT INTO tls_events (task_id, flow_id, ts, src_ip, dest_ip, dest_port, sni, v
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: CreateEngineStat :exec
-INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, rule_load_ms, kernel_drops, alerts_per_min)
+INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, kernel_drops, alerts_total, rules_failed)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (ts) DO NOTHING;
