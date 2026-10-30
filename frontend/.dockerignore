@@ -1,0 +1,7 @@
+# 宿主机（Windows）的 node_modules 含平台相关原生二进制（rolldown 等），绝不能拷进 Linux 构建上下文
+node_modules
+dist
+*.log
+.vite
+.env
+.env.*

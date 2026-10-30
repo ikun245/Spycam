@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # 引擎镜像：Suricata 7.x + engine-agent（unix-socket 模式，见架构设计 §3.1/§3.2）
 FROM golang:1.25-alpine AS agentbuild
 WORKDIR /src

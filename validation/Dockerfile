@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Validator 镜像：数据自验工具（P2 阶段填充完整评测逻辑）
 FROM python:3.12-slim
 WORKDIR /app

@@ -159,3 +159,11 @@
 - **验证**：表驱动测试覆盖 raw IP/Ethernet、正反向、端口/IP/时间窗不符、pcapng、超长与截断记录；用仓库内真实 `c2_beacon.pcap` 回归（360 包中切出 1 次心跳的 6 包会话）。端到端下载尚未在 Docker 中实测
 - **教训**：注释要描述代码**现在**做什么；目标写进 README 的已知缺陷，不写进函数注释
 
+
+## Bug-19：`# syntax=docker/dockerfile:1` 让每次构建都去 Docker Hub 拉前端镜像
+
+- **日期**：2026-10-30（用户构建失败发现） ｜ **引入位置**：全部 5 个 Dockerfile 首行
+- **现象**：`failed to resolve source metadata for docker.io/docker/dockerfile:1 ... mirror.aliyuncs.com ... EOF`，所有镜像构建在第一步失败；另 web 构建 `npm ci` 报 `Exit handler never called!`
+- **原因**：AI 习惯性加了 `# syntax=` 指令，BuildKit 因此每次都要额外解析/拉取 `docker/dockerfile` 前端镜像，走的是本机 daemon 配置的镜像加速器，加速器不可用即全部失败——而该指令对本项目毫无必要（内置前端已支持 `RUN --mount`）。npm 问题则是容器内到 registry 只有约 250KB/s，默认超时下 npm 崩溃，`|| npm install` 回退又再失败一次
+- **修复**：删除全部 `# syntax=` 行；web 构建去掉 `|| npm install` 回退，只用 `npm ci`，调大 fetch 超时/重试、限制并发，并用 BuildKit 缓存挂载保留已下载 tarball；新增 `frontend/.dockerignore` 防止 Windows 的 node_modules 进构建上下文。按用户要求不引入任何第三方镜像源。重建全部 5 个镜像通过，`docker compose up -d` 后 web 返回 200
+- **教训**：每多一个构建期外部依赖都是一个失败点；“样板里常见”的指令要先问是否必要
