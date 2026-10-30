@@ -52,7 +52,8 @@ docker compose --profile tools run --rm validator
 实时抓包（C1）：`spycam-suricata-live` 是常驻服务，`docker compose up -d` 即启动，无需额外 profile 或开关。
 
 ```bash
-# .env 可选：LIVE_IFACE 留空或网卡不存在时自动使用默认路由所在网卡；LIVE_HOME_NET 如 [10.0.0.0/8]
+# .env 可选：LIVE_IFACE 留空或网卡不存在时自动使用默认路由所在网卡；
+# LIVE_HOME_NET 留空时自动为“内网段 + 监听网卡自身 IP”（云主机公网 IP 也会被纳入）
 docker compose up -d
 ```
 
@@ -76,7 +77,7 @@ ip -br link
 sudo ethtool -K eth1 gro off lro off
 # 4. 配置 .env：改掉默认密码/token，并确认
 #    LIVE_IFACE=eth1                              # 留空则自动用默认路由网卡；接镜像口时必须指定
-#    LIVE_HOME_NET=[10.0.0.0/8,192.168.0.0/16]   # 受保护网段，影响规则方向判断
+#    LIVE_HOME_NET=                               # 受保护网段；留空自动=内网段+本机网卡IP，监控整个镜像网段时手动填写
 #    LIVE_EVE_MAX_MB=100
 #    COOKIE_SECURE=true                           # 前面套 HTTPS 反代时开启
 cp .env.example .env && vi .env

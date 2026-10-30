@@ -236,3 +236,12 @@
 - **修复**：去掉 profile，`suricata-live` 改为常驻服务；entrypoint 在 `LIVE_IFACE` 为空或网卡不存在时回退到默认路由网卡，并把实际网卡写入 `eve-out/live/iface` 供 worker 命名数据源；前端只显示状态与统计；新增只读诊断脚本 `scripts/server-check.sh`
 - **验证**：本机普通 `docker compose up -d` 即启动实时容器；`LIVE_IFACE` 为空、为不存在的 `ens999` 时均回退到 `eth0` 并正常抓包；新增单测覆盖网卡名解析（文件优先、非法内容忽略、无配置为 auto）
 - **教训**：需求里的核心能力不能做成默认关闭的开关；部署环境的差异（网卡名）要在程序里兜底，而不是靠用户读文档改配置
+## Bug-28：实时引擎 HOME_NET 只有内网段——公网 IP 服务器上入站攻击永远不告警
+
+- **日期**：2026-10-30（用户 VPS 诊断日志：eth0 为公网 IP 123.254.105.0/24 段，实时告警恒为 0） ｜ **引入位置**：`suricata/suricata.yaml` `HOME_NET` 默认值 + `entrypoint-live.sh`
+- **现象**：实时抓包已运行、worker 已入库，但 eve.json 中 alert 计数为 0
+- **原因**：HOME_NET 默认 `[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]`，内置规则均为 `-> $HOME_NET`（SQLi 还要求源为 `$EXTERNAL_NET`）。云主机网卡直接是公网 IP，不在 HOME_NET 里，打到本机的流量方向判断全部不成立
+- **AI 的锅**：本地验证都在 Docker Desktop（网卡为 192.168.65.x 内网地址）上完成，恰好落在默认 HOME_NET 内，没有考虑公网部署；README 只把 `LIVE_HOME_NET` 写成“可选”
+- **修复**：`LIVE_HOME_NET` 留空时，entrypoint 用 `ip -o addr` 读取监听网卡的全局 IPv4/IPv6 地址，生成“内网段 + 本机地址/32、/128”；生成值同样经过字符白名单校验并以独立 argv 传给 Suricata，启动日志打印实际 HOME_NET
+- **验证**：本机重建后日志为 `HOME_NET=[...,192.168.65.3/32,fdc4:...::3/128]`，Suricata 正常启动；服务器侧待用户用外部请求触发规则确认
+- **教训**：“方向”相关的配置（HOME_NET）要跟部署环境一起验证；本地内网地址的测试结果不能直接代表公网部署

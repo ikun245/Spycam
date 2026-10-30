@@ -23,6 +23,14 @@ if [ -z "${LIVE_IFACE}" ] || [ ! -e "/sys/class/net/${LIVE_IFACE}" ]; then
   LIVE_IFACE="${detected}"
 fi
 
+# 未指定 HOME_NET 时：内网段 + 监听网卡自身的地址。云主机网卡常是公网 IP，
+# 若只用 RFC1918 默认值，所有 "-> $HOME_NET" 的入站规则都匹配不到本机。
+if [ -z "${LIVE_HOME_NET}" ]; then
+  addrs=$(ip -o addr show dev "${LIVE_IFACE}" scope global 2>/dev/null \
+    | awk '$3=="inet"{split($4,a,"/"); printf ",%s/32", a[1]} $3=="inet6"{split($4,a,"/"); printf ",%s/128", a[1]}')
+  LIVE_HOME_NET="[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12${addrs}]"
+fi
+
 # 网卡名与 HOME_NET 只接受白名单字符（参数均以独立 argv 传递，不经 shell 拼接）
 case "${LIVE_IFACE}" in
   ""|*[!A-Za-z0-9._-]*) echo "invalid LIVE_IFACE" >&2; exit 2 ;;
@@ -34,7 +42,7 @@ fi
 mkdir -p "${LOG_DIR}"
 # 告知 worker 实际监听的网卡（用于数据源命名与界面展示）
 printf '%s\n' "${LIVE_IFACE}" > "${LOG_DIR}/iface"
-echo "live capture on interface ${LIVE_IFACE}" >&2
+echo "live capture on interface ${LIVE_IFACE}, HOME_NET=${LIVE_HOME_NET}" >&2
 
 . /usr/local/lib/spycam/rules-path.sh
 choose_rule_path

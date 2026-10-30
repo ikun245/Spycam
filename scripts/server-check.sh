@@ -89,7 +89,7 @@ section() { printf '\n===== %s =====\n' "$1"; }
   docker logs spycam-worker 2>&1 | grep -i live | tail -n 10
 
   section "最近的实时告警（eve.json 中 alert 计数）"
-  docker exec spycam-suricata-live sh -c 'grep -c "\"event_type\":\"alert\"" /var/log/suricata/live/eve.json 2>/dev/null || echo 0' 2>&1
+  docker exec spycam-suricata-live sh -c 'grep -c "\"event_type\":\"alert\"" /var/log/suricata/live/eve.json 2>/dev/null; true' 2>&1
 } 2>&1 | tee "${LOG}"
 
 printf '\n诊断结果已保存到 %s\n' "${LOG}"
