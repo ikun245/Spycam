@@ -83,4 +83,19 @@
 - **未验证**：本机 Docker 未运行，`-S` 与 `-T` 组合在 jasonish/suricata 镜像内的实际输出尚未实测；agent 侧仅有输入校验的单测
 - **教训**：能在副作用之前做的校验就不要放到副作用之后用回滚补
 
+## D-10 C1 实时抓包：独立 af-packet 引擎实例 + 尾随采集
+
+- **日期**：2026-10-30
+- **背景**：对照题面复核时发现系统只有离线回放链路；C1 要求“实时抓包 + 推送”
+- **备选方案**：a) 复用 unix-socket 引擎（该模式只支持 pcap-file，不行）；b) 定时 tcpdump 切片后走回放队列（延迟取决于切片周期，且重复落盘）；c) 独立 Suricata 实例 `--af-packet`，worker 尾随 eve.json
+- **实际选择**：c，放在 compose `live` profile，默认不启动。
+  - 引擎：`network_mode` 默认 host，接口与 HOME_NET 走环境变量并做字符白名单。容器内 watcher 监测 rules-active 的校验和，变化时发 USR2 热重载，因此无需挂 docker.sock
+  - 采集：worker 每秒从 Redis 记录的偏移继续读，只消费完整行；文件变短时偏移归零
+  - 数据模型：按接口生成确定性 UUID 的 pcap/task（sample_type=live），复用全部告警、聚合、事件表和去重键
+  - 推送：SSE 消息 `type:"live"`
+  - 不支持的操作：取证切片与“重放”对 live 源返回 409，因为没有落盘 pcap
+- **实测**：bridge 模式 DNS 隧道告警，包→入库 0.16–0.30s；host 模式下真实 HTTP 外联触发 C2 心跳规则（sid 1000006），延迟 0.46s；规则禁用后 live 引擎热重载，告警停止
+- **局限**：Docker Desktop 的 host 网络是 VM 网卡，看不到 Windows 局域网流量；真实网卡需 Linux 主机，或用 SPAN/镜像口、远程 tcpdump 转发；live eve.json 不轮转
+- **教训**：实时与离线差别在数据入口，下游模型应保持同一套，否则聚合、事件、处置都要做两遍
+
 （后续决策按此格式追加）

@@ -14,9 +14,9 @@ const Channel = "chan:alerts"
 // Event 是推送给前端的消息。离线回放模式下告警在任务采集完成时批量入库，
 // 因此以任务生命周期为粒度推送：running → done（携带新增告警/告警组/事件数）或 failed。
 type Event struct {
-	Type      string `json:"type"` // task
+	Type      string `json:"type"` // task=回放任务生命周期；live=在线抓包增量告警
 	TaskID    string `json:"task_id"`
-	Status    string `json:"status"` // running|done|failed
+	Status    string `json:"status"` // running|done|failed（live 恒为 running）
 	Alerts    int64  `json:"alerts,omitempty"`
 	Incidents int    `json:"incidents,omitempty"`
 	Error     string `json:"error,omitempty"`

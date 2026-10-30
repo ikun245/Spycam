@@ -10,6 +10,7 @@ interface PcapItem {
   original_name: string;
   size_bytes: number;
   sha256: string | null;
+  sample_type: string;
   created_at: string | null;
 }
 
@@ -52,9 +53,11 @@ function PcapList() {
     {
       title: '操作',
       width: 100,
+      // 在线抓包数据源没有落盘的 pcap，不能回放
       render: (_: unknown, row: PcapItem) => (
         <Button
           size="small"
+          disabled={row.sample_type === 'live'}
           loading={replay.isPending && replay.variables === row.id}
           onClick={() => replay.mutate(row.id)}
         >

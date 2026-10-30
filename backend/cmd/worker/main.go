@@ -17,8 +17,9 @@ import (
 	"spycam/backend/internal/aggregate"
 	"spycam/backend/internal/config"
 	"spycam/backend/internal/engine"
-	"spycam/backend/internal/ingest"
 	"spycam/backend/internal/incident"
+	"spycam/backend/internal/ingest"
+	"spycam/backend/internal/live"
 	"spycam/backend/internal/realtime"
 	"spycam/backend/internal/store/gen"
 )
@@ -70,6 +71,20 @@ func main() {
 			}
 		}
 	}
+
+	// 在线抓包（C1）：live profile 的 Suricata 把 eve 写到 live/eve.json，这里持续 tail 增量入库；
+	// 未启用 live profile 时文件不存在，tailer 只是空转等待。
+	liveIface := os.Getenv("LIVE_IFACE")
+	if liveIface == "" {
+		liveIface = "eth0"
+	}
+	tailer := &live.Tailer{
+		Pool: pool, Redis: rdb, Pub: pub,
+		EvePath:   filepath.Join(eveRoot, "live", "eve.json"),
+		Iface:     liveIface,
+		AggWindow: cfg.AggWindowSeconds,
+	}
+	go tailer.Run(ctx)
 
 	slog.Info("worker started",
 		"agg_window_seconds", cfg.AggWindowSeconds,

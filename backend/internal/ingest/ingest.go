@@ -1,4 +1,4 @@
-﻿// Package ingest 读取任务输出目录中的 eve.json，解析后批量写入 PostgreSQL（架构设计 §6.4）。
+// Package ingest 读取任务输出目录中的 eve.json，解析后批量写入 PostgreSQL（架构设计 §6.4）。
 package ingest
 
 import (
@@ -80,6 +80,77 @@ func ingestFile(ctx context.Context, q *gen.Queries, taskID, path string) (Resul
 				return res, nil
 			}
 			return res, err
+		}
+	}
+}
+
+// LineHandler 处理一条完整的 eve 行；返回错误只计入 Skipped，不中断采集。
+type LineHandler func(line []byte) error
+
+// IngestFrom 从 offset 开始增量采集持续写入中的 eve.json（在线抓包 C1）。
+// 只消费以 '\n' 结尾的完整行：Suricata 正在写的半行留到下一轮，避免截断解析。
+// 返回新的 offset；文件被截断/轮转（size < offset）时从头开始。
+func IngestFrom(ctx context.Context, pool *pgxpool.Pool, taskID, path string, offset int64) (Result, int64, error) {
+	q := gen.New(pool)
+	return scanFrom(path, offset, func(line []byte) error {
+		return processLine(ctx, q, taskID, line)
+	})
+}
+
+func scanFrom(path string, offset int64, handle LineHandler) (Result, int64, error) {
+	var res Result
+	f, err := os.Open(path)
+	if err != nil {
+		return res, offset, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return res, offset, err
+	}
+	if st.Size() < offset {
+		offset = 0
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return res, offset, err
+	}
+	reader := bufio.NewReaderSize(f, 1<<20)
+	for {
+		raw, err := readRawLine(reader)
+		if err == io.EOF {
+			return res, offset, nil // 无换行的尾部是未写完的半行，不推进 offset
+		}
+		if err != nil {
+			return res, offset, err
+		}
+		offset += int64(len(raw))
+		line := trimEOL(raw)
+		if len(line) == 0 {
+			continue
+		}
+		res.Events++
+		if perr := handle(line); perr != nil {
+			res.Skipped++
+			slog.Warn("eve line skipped", "path", path, "err", perr)
+		} else if isAlert(line) {
+			res.Alerts++
+		}
+	}
+}
+
+// readRawLine 读取含 '\n' 的完整一行；读到 EOF 仍无换行时返回 io.EOF。
+func readRawLine(r *bufio.Reader) ([]byte, error) {
+	var out []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		out = append(out, chunk...)
+		switch err {
+		case nil:
+			return out, nil
+		case bufio.ErrBufferFull:
+			continue
+		default:
+			return out, err
 		}
 	}
 }
@@ -191,18 +262,18 @@ func processLine(ctx context.Context, q *gen.Queries, taskID string, line []byte
 			return nil
 		}
 		return q.CreateHttpEvent(ctx, gen.CreateHttpEventParams{
-			TaskID:       taskID,
-			FlowID:       int8Ptr(ev.FlowID),
-			Ts:           ts,
-			SrcIp:        textPtr(strOrNil(ev.SrcIP)),
-			DestIp:       textPtr(strOrNil(ev.DestIP)),
-			DestPort:     int4Ptr(ev.DestPort),
-			Hostname:     textPtr(strOrNil(ev.HTTP.Hostname)),
-			HttpUri:      textPtr(strOrNil(ev.HTTP.URL)),
-			HttpMethod:   textPtr(strOrNil(ev.HTTP.HTTPMethod)),
-			HttpStatus:   int4Ptr(ev.HTTP.Status),
+			TaskID:        taskID,
+			FlowID:        int8Ptr(ev.FlowID),
+			Ts:            ts,
+			SrcIp:         textPtr(strOrNil(ev.SrcIP)),
+			DestIp:        textPtr(strOrNil(ev.DestIP)),
+			DestPort:      int4Ptr(ev.DestPort),
+			Hostname:      textPtr(strOrNil(ev.HTTP.Hostname)),
+			HttpUri:       textPtr(strOrNil(ev.HTTP.URL)),
+			HttpMethod:    textPtr(strOrNil(ev.HTTP.HTTPMethod)),
+			HttpStatus:    int4Ptr(ev.HTTP.Status),
 			HttpUserAgent: textPtr(strOrNil(ev.HTTP.UserAgent)),
-			Raw:          line,
+			Raw:           line,
 		})
 	case "tls":
 		if ev.TLS == nil {

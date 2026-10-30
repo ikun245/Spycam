@@ -17,6 +17,9 @@ import (
 	"time"
 )
 
+// suricataConfig 在镜像内的路径；不放 /etc/suricata（基础镜像把它声明为 VOLUME，重建容器不会更新）。
+const suricataConfig = "/opt/spycam/suricata.yaml"
+
 // Status 是引擎运行状态的只读视图。未测得的字段省略（omitempty），避免前端把“未知”显示成 0。
 type Status struct {
 	Running     bool   `json:"running"`
@@ -133,7 +136,7 @@ func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// 先校验规则（参数数组，绝不 sh -c；M7）
 	cmd := exec.CommandContext(r.Context(), a.suriBin, "-T",
-		"-c", "/etc/suricata/suricata.yaml",
+		"-c", suricataConfig,
 		"-l", "/var/log/suricata")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -192,7 +195,7 @@ func (a *AgentServer) handleValidate(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	cmd := exec.CommandContext(r.Context(), a.suriBin, "-T",
-		"-c", "/etc/suricata/suricata.yaml",
+		"-c", suricataConfig,
 		"-S", ruleFile,
 		"-l", dir)
 	out, err := cmd.CombinedOutput()

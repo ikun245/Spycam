@@ -11,12 +11,21 @@ vars:
     HTTP_PORTS: "80,81,443,3000,8000,8008,8080,8081,8443"
     SHELLCODE_PORTS: "!80"
 
-default-rule-path: /etc/suricata/rules
+# 规则唯一真相是 api 生成的 rules-active（M4：管理端改动真实生效）；entrypoint 在其缺失时回退镜像内置规则
+default-rule-path: /opt/spycam/rules-active
 rule-files:
   - spycam.rules
 
 classification-file: /etc/suricata/classification.config
 reference-config-file: /etc/suricata/reference.config
+
+# 在线抓包（C1，live profile）：--af-packet=<iface> 时使用 default 条目；离线回放不读取本段
+af-packet:
+  - interface: default
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    tpacket-v3: yes
 
 # 内部控制：unix-socket 常驻回放（pcap-file / ruleset-reload-nonblocking）
 unix-command:

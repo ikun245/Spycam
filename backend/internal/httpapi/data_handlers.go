@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
+	"spycam/backend/internal/live"
 	"spycam/backend/internal/store/gen"
 )
 
@@ -171,8 +172,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := gen.New(s.pool)
-	if _, err := q.GetPcap(r.Context(), pcapID.String()); err != nil {
+	src, err := q.GetPcap(r.Context(), pcapID.String())
+	if err != nil {
 		writeErr(w, http.StatusNotFound, "pcap not found")
+		return
+	}
+	if src.SampleType == live.SampleType {
+		writeErr(w, http.StatusConflict, "live capture source has no pcap file to replay")
 		return
 	}
 	taskID := uuid.New()

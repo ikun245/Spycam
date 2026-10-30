@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { notification } from 'antd';
 
-// 与后端 realtime.Event 对应（C1 实时推送）
+// 与后端 realtime.Event 对应（C1 实时推送）：task=回放任务生命周期，live=在线抓包新增告警
 interface TaskEvent {
-  type: 'task';
+  type: 'task' | 'live';
   task_id: string;
   status: 'running' | 'done' | 'failed';
   alerts?: number;
@@ -29,6 +29,18 @@ export function useRealtime(): StreamState {
       try {
         ev = JSON.parse((e as MessageEvent<string>).data) as TaskEvent;
       } catch {
+        return;
+      }
+      if (ev.type === 'live') {
+        for (const key of ['alerts', 'groups', 'incidents', 'overview']) {
+          qc.invalidateQueries({ queryKey: [key] });
+        }
+        // 同一 key 覆盖刷新，持续告警时不刷屏
+        notification.warning({
+          key: 'live-alerts',
+          message: '实时抓包新告警',
+          description: `新增告警 ${ev.alerts ?? 0} 条`,
+        });
         return;
       }
       qc.invalidateQueries({ queryKey: ['tasks'] });

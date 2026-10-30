@@ -39,9 +39,28 @@ services:
       AGG_WINDOW_SECONDS: ${AGG_WINDOW_SECONDS:-60}
     volumes:
       - pcaps:/data/pcaps:ro
-      - rules-active:/etc/suricata/rules-active:ro
+      - rules-active:/opt/spycam/rules-active:ro
       - eve-out:/var/log/suricata
     networks: [internal]
+
+  # 在线抓包（C1）：docker compose --profile live up -d
+  # 默认 host 网络监听宿主机网卡（需 Linux 宿主；Docker Desktop 只能看到其虚拟机网卡）。
+  # 不发布任何端口，只写 eve-out/live/eve.json，由 worker 持续 tail 入库。
+  suricata-live:
+    image: spycam/suricata:0.1.0
+    container_name: spycam-suricata-live
+    profiles: ["live"]
+    entrypoint: ["/entrypoint-live.sh"]
+    network_mode: ${LIVE_NETWORK_MODE:-host}
+    cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
+    environment:
+      LIVE_IFACE: ${LIVE_IFACE:-eth0}
+      LIVE_HOME_NET: ${LIVE_HOME_NET:-}
+    volumes:
+      - rules-active:/opt/spycam/rules-active:ro
+      - eve-out:/var/log/suricata
+    depends_on:
+      - suricata
 
   api:
     image: spycam/api:0.1.0
@@ -77,6 +96,7 @@ services:
     environment:
       MIGRATIONS_DIR: /app/migrations
       EVE_OUT_DIR: /var/log/suricata
+      LIVE_IFACE: ${LIVE_IFACE:-eth0}
       ENGINE_AGENT_URL: http://suricata:9090
     volumes:
       - eve-out:/var/log/suricata:ro

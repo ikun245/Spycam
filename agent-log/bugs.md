@@ -167,3 +167,20 @@
 - **原因**：AI 习惯性加了 `# syntax=` 指令，BuildKit 因此每次都要额外解析/拉取 `docker/dockerfile` 前端镜像，走的是本机 daemon 配置的镜像加速器，加速器不可用即全部失败——而该指令对本项目毫无必要（内置前端已支持 `RUN --mount`）。npm 问题则是容器内到 registry 只有约 250KB/s，默认超时下 npm 崩溃，`|| npm install` 回退又再失败一次
 - **修复**：删除全部 `# syntax=` 行；web 构建去掉 `|| npm install` 回退，只用 `npm ci`，调大 fetch 超时/重试、限制并发，并用 BuildKit 缓存挂载保留已下载 tarball；新增 `frontend/.dockerignore` 防止 Windows 的 node_modules 进构建上下文。按用户要求不引入任何第三方镜像源。重建全部 5 个镜像通过，`docker compose up -d` 后 web 返回 200
 - **教训**：每多一个构建期外部依赖都是一个失败点；“样板里常见”的指令要先问是否必要
+
+## Bug-20：引擎从未加载 rules-active，M4 规则启停对检测完全无效
+
+- **日期**：2026-10-30（对照题面复核 M4 时发现） ｜ **引入位置**：`suricata/suricata.yaml` `default-rule-path`
+- **现象**：UI 新建的 sid 2000001 在引擎 `ruleset-stats` 中不存在；禁用 XSS 规则后重放 pcap，XSS 告警数不变
+- **原因**：api 把启用规则写到 `rules-active/spycam.rules` 并触发重载，但 yaml 的 `default-rule-path` 仍指向镜像内置的 `/etc/suricata/rules`。重载“成功”，重载的却是内置文件。之前所有自验只用默认规则集，所以一直没暴露；规则页显示启停成功、审计和版本快照也都正常，假象很完整
+- **修复**：规则路径改为 `/opt/spycam/rules-active`；新增 `rules-path.sh`，启动时最多等待 60s 让 api 生成活动规则文件，超时回退内置规则，并通过 `--set default-rule-path=` 显式传入
+- **验证**：重放 web_attack pcap，XSS 告警 120 → 禁用后 0 → 重新启用后 120，同时 SQLi 始终为 240；新建规则可在引擎规则统计中看到
+- **教训**：“接口返回成功”不等于“生效”。规则管理的验收必须是行为级的：改规则 → 重放 → 告警数变化
+
+## Bug-21：Bug-5 复发——临时绕过掩盖了未落地的长期修复
+
+- **日期**：2026-10-30 ｜ **引入位置**：`suricata/Dockerfile`（配置放在基础镜像声明的 VOLUME 路径 `/etc/suricata` 下）
+- **现象**：修复 Bug-20 后改了 suricata.yaml 并重建镜像，`docker compose up -d` 后容器内 yaml 仍是旧版
+- **原因**：Bug-5 当时只用 `--renew-anon-volumes` 绕过，记录里写的“长期方案”没有实施。任何普通 `up -d` 都会复用旧匿名卷，配置与内置规则改动全部静默失效；评审者照 README 复跑时同样会中招
+- **修复**：自有配置与内置规则全部移出 VOLUME 路径——`/opt/spycam/suricata.yaml`、`/opt/spycam/rules`、`/opt/spycam/rules-active`（只读挂载）；engine-agent 的 `-c` 参数改用常量 `suricataConfig`。之后普通 `up -d` 即可生效，README 中的 `--renew-anon-volumes` 说明一并删除
+- **教训**：bug 记录里写的“长期方案”要么当场做，要么进 README 已知缺陷；只写在 bugs.md 里等于没做

@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"spycam/backend/internal/live"
 	"spycam/backend/internal/pcapslice"
 	"spycam/backend/internal/store/gen"
 )
@@ -107,6 +108,11 @@ func (s *Server) handleExportAlertPcap(w http.ResponseWriter, r *http.Request) {
 	pcap, err := q.GetPcap(r.Context(), task.PcapID)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "source pcap not found")
+		return
+	}
+	if pcap.SampleType == live.SampleType {
+		// 在线抓包不落全量包（题面明确排除全量存包），没有可切片的原始文件
+		writeErr(w, http.StatusConflict, "live capture alerts have no stored pcap")
 		return
 	}
 
