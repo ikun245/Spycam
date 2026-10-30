@@ -10,7 +10,7 @@ import (
 // handleEngineStatusV2 引擎可观测（S6）：agent 存活状态 + 回放/实时两个引擎实例各自最近一条 engine_stats
 // （规则加载耗时、内核丢包、告警计数）。
 func (s *Server) handleEngineStatusV2(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]any{}
+	resp := map[string]any{"live_iface": s.cfg.LiveIface}
 	if st, err := s.agent.Status(r.Context()); err == nil {
 		resp["agent"] = st
 	} else {

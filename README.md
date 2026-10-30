@@ -59,7 +59,7 @@ docker compose --profile live up -d
 - 独立 Suricata 实例以 af-packet 模式监听 `LIVE_IFACE`，worker 每秒尾随 `eve-out/live/eve.json` 入库，前端经 SSE 收到 `live` 事件即刷新；实测包→入库 0.2–0.5s
 - 规则启停对实时引擎同样生效（容器内 watcher 检测 rules-active 变化后发 USR2 热重载）
 - `live/eve.json` 超过 `LIVE_EVE_MAX_MB`（默认 100）自动轮转为 `eve.json.1` 并 SIGHUP 重开；worker 按 inode 识别轮转，先读完旧文件剩余部分再切新文件（实测 1MB 阈值轮转无报错、入库不中断）
-- 引擎状态页分别展示回放实例与实时实例的 stats（`engine_stats.source`），实时卡片 60 秒无更新标记为过期
+- 引擎状态页始终显示「实时抓包引擎」卡片：未启用时显示“未启用”及接入步骤（当前 `LIVE_IFACE`、启动命令、镜像流量方式），启用后展示实时实例 stats（`engine_stats.source`），60 秒无更新标记为“已停止”。Web 不能启停容器（不挂载 docker.sock），启停只能在服务器上执行 compose 命令
 - Docker Desktop（Windows/macOS）的 host 网络是虚拟机网卡，只能看到 VM 自身流量（实测可捕获容器外联 HTTP 并触发 C2 心跳规则），看不到宿主局域网；本机演示可设 `LIVE_NETWORK_MODE=bridge`
 
 ### 部署到 Linux 服务器长期运行
@@ -91,7 +91,8 @@ docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
 |---|---|
 | 只保护本机（如一台 Web 服务器） | `LIVE_IFACE` 设为对外网卡即可 |
 | 保护整个网段 | 交换机配置 SPAN/端口镜像，或串接网络 TAP，镜像口接到服务器的一块独立网卡（该网卡不配 IP） |
-| 云上 VPC | 阿里云/腾讯云/AWS 的“流量镜像”功能，以 VXLAN 封装送到本机网卡；Suricata 默认解码 4789/udp 的 VXLAN |
+| 云上 VPC | 阿里云/腾讯云/AWS 的“流量镜像”功能，以 VXLAN 封装送到本机网卡；`suricata.yaml` 已显式开启 VXLAN（4789/udp）与 Geneve（6081/udp）解封装，检测内层原始流量 |
+| 其他安全产品（防火墙/NDR 等） | 若支持流量镜像或抓包外发，镜像到本机网卡；只输出 syslog/告警日志的产品不提供原始流量，无法接入本引擎，可导出 pcap 后上传回放 |
 | 远端主机临时抓包 | `ssh host "tcpdump -i eth0 -w - -G 300"` 落成 pcap 后走「数据与回放」上传回放 |
 
 #### 公网访问与端口

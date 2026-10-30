@@ -81,6 +81,7 @@ services:
       SEED_RULES_DIR: /app/seed-rules
       RULES_ACTIVE_DIR: /rules-active
       PCAPS_DIR: /data/pcaps
+      LIVE_IFACE: ${LIVE_IFACE:-eth0}
       ENGINE_AGENT_URL: http://suricata:9090
     volumes:
       - pcaps:/data/pcaps

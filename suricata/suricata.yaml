@@ -27,6 +27,15 @@ af-packet:
     defrag: yes
     tpacket-v3: yes
 
+# 接入云厂商 VPC 流量镜像（VXLAN/Geneve 封装）时自动解封装，检测内层原始流量
+decoder:
+  vxlan:
+    enabled: true
+    ports: "4789"
+  geneve:
+    enabled: true
+    ports: "6081"
+
 # 内部控制：unix-socket 常驻回放（pcap-file / ruleset-reload-nonblocking）
 unix-command:
   enabled: true

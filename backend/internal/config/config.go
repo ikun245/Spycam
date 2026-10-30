@@ -25,6 +25,8 @@ type Config struct {
 	AggWindowSeconds  int
 	// CookieSecure 为 true 时会话 Cookie 带 Secure（HTTPS 反代前部署时开启；本地 http://127.0.0.1 需关闭）
 	CookieSecure bool
+	// LiveIface 实时抓包网卡（与 suricata-live 共用 LIVE_IFACE），仅用于前端展示接入状态
+	LiveIface string
 }
 
 // Load 读取环境变量并校验必填项，缺失即返回错误（fail fast）。
@@ -41,6 +43,7 @@ func Load() (*Config, error) {
 		EngineAgentToken:  os.Getenv("ENGINE_AGENT_TOKEN"),
 		SeedAdminUser:     getEnv("SEED_ADMIN_USER", "admin"),
 		SeedAdminPassword: os.Getenv("SEED_ADMIN_PASSWORD"),
+		LiveIface:         getEnv("LIVE_IFACE", "eth0"),
 	}
 
 	for name, v := range map[string]string{
