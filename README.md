@@ -100,6 +100,20 @@ sh scripts/server-check.sh            # 脚本不在项目内时：sh server-che
 | 其他安全产品（防火墙/NDR 等） | 若支持流量镜像或抓包外发，镜像到本机网卡；只输出 syslog/告警日志的产品不提供原始流量，无法接入本引擎，可导出 pcap 后上传回放 |
 | 远端主机临时抓包 | `ssh host "tcpdump -i eth0 -w - -G 300"` 落成 pcap 后走「数据与回放」上传回放 |
 
+#### 验证规则是否生效（攻击演示脚本）
+
+`scripts/attack-demo/` 下提供了 6 个纯标准库 Python 脚本，各对应一条规则，持续攻击约 30s 后可在前端「告警列表」看到对应告警。外部 4 个（端口扫描/SSH 爆破/SQLi/XSS）从攻击机打向服务器、无需 root；DNS 隧道、C2 心跳因规则方向为 `$HOME_NET ->`，需在服务器本机运行。用法与注意事项见 [scripts/attack-demo/README.md](scripts/attack-demo/README.md)。
+
+```bash
+# 攻击机：一键并行跑 4 个外部可触发的攻击（Web 攻击走明文 80 端口）
+python3 scripts/attack-demo/run_all.py <服务器公网IP> --http-port 80 -d 30
+# 服务器本机：演示失陷主机外联
+python3 scripts/attack-demo/dns_tunnel.py -d 30
+python3 scripts/attack-demo/c2_beacon.py --dest example.com --port 80 -d 30
+```
+
+> 仅对你自己拥有或已获授权的主机运行；脚本只产生匹配规则特征的良性请求。
+
 #### 公网访问与端口
 
 整套系统只占用宿主机一个端口：`${WEB_BIND}:${WEB_PORT}`，默认是 `127.0.0.1:28765`。容器内 nginx 也监听 28765，不使用 80、8080 等常用端口，不会影响宿主机已有的 nginx 或其他 Web 服务。postgres、redis、api 都不发布端口。若 28765 已被占用，可在 `.env` 中修改 `WEB_PORT`。

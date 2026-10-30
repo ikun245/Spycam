@@ -145,4 +145,15 @@
 - **实际选择**：d。entrypoint 把实际网卡写入 `eve-out/live/iface`，worker 以此命名实时数据源；引擎状态页只显示状态与统计。部署说明保留在 README，另提供只读诊断脚本 `scripts/server-check.sh`，用户在服务器运行后回传结果。`suricata.yaml` 显式开启 VXLAN/Geneve 解封装，以接入云流量镜像
 - **代价**：Windows/macOS 本机演示也会启动实时容器（只能看到 Docker VM 自身流量，资源占用小）；不能在 Web 上启停或切换网卡；只输出 syslog 的安全产品没有原始流量，仍不能接入
 
+## D-15 攻击演示脚本的实现方式与方向性
+
+- **日期**：2026-10-30
+- **背景**：用户需要若干 Python 脚本，持续攻击约 30s 来直观展示 6 条规则的检测效果（面向已开启实时抓包的服务器）。
+- **备选方案**：
+  - a) 复用 `validation/gen_scenarios.py` 的 Scapy 造数：生成离线 pcap 再回放，不是“实时攻击”，且需 scapy 依赖/root
+  - b) 用 scapy 实时发 SYN 等原始包：能精确构造，但需 root、依赖第三方库，用户在不同机器上运行门槛高
+  - c) 纯标准库实时发包：端口扫描/SSH 爆破用 `socket.connect`（connect 即发 SYN，命中 flags:S 计数规则，无需 root）；SQLi/XSS 用 `http.client` 发明文 HTTP；DNS 隧道用 `socket` 手搓 DNS 报文；C2 心跳用 `http.client` POST
+- **实际选择**：c。无第三方依赖、免 root、跨平台易运行。按规则方向性拆分：1000001-1000004（`-> $HOME_NET`）从攻击机打向服务器；1000005/1000006（`$HOME_NET ->`）必须在服务器本机运行。Web 攻击强制走明文 80 端口（HTTPS 加密引擎看不到 URI）。脚本置于 `scripts/attack-demo/`，带 README 与「仅授权测试」提示。
+- **代价**：connect 扫描只覆盖规则端口集合、不探测开放端口（演示足够）；C2 心跳需一个端口开放的外部主机做目的地（默认 example.com:80）才能完成握手让引擎解析到 HTTP。
+
 （后续决策按此格式追加）
