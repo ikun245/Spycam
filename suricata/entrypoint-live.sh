@@ -3,9 +3,25 @@
 # 由 worker 持续 tail 增量入库。规则与离线回放共用 rules-active，文件变化时 USR2 热重载。
 set -eu
 
-LIVE_IFACE="${LIVE_IFACE:-eth0}"
+LIVE_IFACE="${LIVE_IFACE:-}"
 LIVE_HOME_NET="${LIVE_HOME_NET:-}"
 LOG_DIR=/var/log/suricata/live
+
+# 未配置或配置的网卡不存在（云主机常见 ens3/enp0s3 而非 eth0）时，回退到默认路由所在网卡
+default_route_iface() {
+  while read -r name dest _; do
+    if [ "${dest}" = "00000000" ]; then printf '%s' "${name}"; return 0; fi
+  done < /proc/net/route
+  return 1
+}
+if [ -z "${LIVE_IFACE}" ] || [ ! -e "/sys/class/net/${LIVE_IFACE}" ]; then
+  detected=$(default_route_iface || true)
+  if [ -z "${detected}" ]; then
+    echo "LIVE_IFACE '${LIVE_IFACE}' not found and no default route interface detected" >&2; exit 2
+  fi
+  echo "LIVE_IFACE '${LIVE_IFACE}' not set or not found, using default route interface ${detected}" >&2
+  LIVE_IFACE="${detected}"
+fi
 
 # 网卡名与 HOME_NET 只接受白名单字符（参数均以独立 argv 传递，不经 shell 拼接）
 case "${LIVE_IFACE}" in
@@ -16,6 +32,9 @@ if [ -n "$(printf '%s' "${LIVE_HOME_NET}" | tr -d '0-9A-Fa-f.:/,[]! ')" ]; then
 fi
 
 mkdir -p "${LOG_DIR}"
+# 告知 worker 实际监听的网卡（用于数据源命名与界面展示）
+printf '%s\n' "${LIVE_IFACE}" > "${LOG_DIR}/iface"
+echo "live capture on interface ${LIVE_IFACE}" >&2
 
 . /usr/local/lib/spycam/rules-path.sh
 choose_rule_path

@@ -227,3 +227,12 @@
 - **修复**：agent 为每个回放任务串行启动独立的 `suricata -r` 进程：参数数组，关闭 unix-command，规则目录选择与 rules-path.sh 一致，超时 5 分钟。入队计数在响应前同步完成，避免 worker 误判空闲。失败原因经 `replay-status.errors[task_id]` 回传，worker 据此把任务标记为失败，不再静默完成。常驻实例保留，用于热重载与状态。慢扫变种的预判恢复为 miss
 - **验证**：容器内同一 pcap 一次性运行两次，均为 0 条告警，单次约 0.5s；新增单测覆盖“入队即非空闲”和“进程失败带回原因”；validator 连续两轮结果一致（见 report.md）
 - **教训**：同一输入多次运行结果不同，说明存在隐藏状态，不能挑一个“合理”的结果去改预判。拿到与预判不符的结果时，第一步应该是在干净环境复现，而不是给结果编一套解释
+## Bug-27：实时抓包默认不启动、网卡写死 eth0——Linux 部署后系统看起来“一直离线”
+
+- **日期**：2026-10-30（用户在 VPS 部署后反馈） ｜ **引入位置**：`docker-compose.yml` `suricata-live`（`profiles: ["live"]`、`LIVE_IFACE:-eth0`）
+- **现象**：用户从 GitHub 下载 zip 后执行 `docker compose up -d`，容器列表里没有 `spycam-suricata-live`，引擎状态页没有任何实时数据，找不到接入实时流量的入口
+- **原因**：实时抓包放在可选 profile 里，必须显式 `--profile live` 才启动；界面只在实时实例上报过 stats 后才渲染卡片。即使启动，`LIVE_IFACE` 默认 `eth0`，云主机常见网卡名为 `ens3`/`enp0s3`，Suricata 会因网卡不存在退出
+- **AI 的锅**：C1 是需求中的实时检测能力，AI 却按“可选附加功能”设计成 profile，只在 README 里写了一句启动命令。第一次修复又在前端页面里写了一大段部署说明，把文档问题搬进产品界面，被用户否决
+- **修复**：去掉 profile，`suricata-live` 改为常驻服务；entrypoint 在 `LIVE_IFACE` 为空或网卡不存在时回退到默认路由网卡，并把实际网卡写入 `eve-out/live/iface` 供 worker 命名数据源；前端只显示状态与统计；新增只读诊断脚本 `scripts/server-check.sh`
+- **验证**：本机普通 `docker compose up -d` 即启动实时容器；`LIVE_IFACE` 为空、为不存在的 `ens999` 时均回退到 `eth0` 并正常抓包；新增单测覆盖网卡名解析（文件优先、非法内容忽略、无配置为 auto）
+- **教训**：需求里的核心能力不能做成默认关闭的开关；部署环境的差异（网卡名）要在程序里兜底，而不是靠用户读文档改配置

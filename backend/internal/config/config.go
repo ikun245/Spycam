@@ -43,7 +43,7 @@ func Load() (*Config, error) {
 		EngineAgentToken:  os.Getenv("ENGINE_AGENT_TOKEN"),
 		SeedAdminUser:     getEnv("SEED_ADMIN_USER", "admin"),
 		SeedAdminPassword: os.Getenv("SEED_ADMIN_PASSWORD"),
-		LiveIface:         getEnv("LIVE_IFACE", "eth0"),
+		LiveIface:         os.Getenv("LIVE_IFACE"),
 	}
 
 	for name, v := range map[string]string{

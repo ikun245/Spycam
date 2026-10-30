@@ -10,7 +10,7 @@
                                   │                      Redis(队列/流/会话/PubSub)
             worker(Go: 队列消费/eve采集/聚合/事件串联)
                   └─ engine-agent(内部HTTP+token) ── 每任务 suricata -r（回放）/ Suricata unix-socket（规则校验与热重载）── pcaps/rules-active(只读卷)
-                                    └─ live tailer ── eve-out/live/eve.json ── suricata-live(af-packet, live profile)validator(tools profile: Scapy 造数 + 走公开API评测)
+                                    └─ live tailer ── eve-out/live/eve.json ── suricata-live(af-packet, 常驻)validator(tools profile: Scapy 造数 + 走公开API评测)
 ```
 
 - [需求梳理](docs/需求梳理.md) — 需求唯一来源（MoSCoW、验收口径、评分规则）
@@ -49,17 +49,18 @@ docker compose up -d
 docker compose --profile tools run --rm validator
 ```
 
-实时抓包（C1，可选 `live` profile）：
+实时抓包（C1）：`spycam-suricata-live` 是常驻服务，`docker compose up -d` 即启动，无需额外 profile 或开关。
 
-```powershell
-# 在 .env 中设置 LIVE_IFACE（默认 eth0）、可选 LIVE_HOME_NET（如 [10.0.0.0/8]）
-docker compose --profile live up -d
+```bash
+# .env 可选：LIVE_IFACE 留空或网卡不存在时自动使用默认路由所在网卡；LIVE_HOME_NET 如 [10.0.0.0/8]
+docker compose up -d
 ```
 
+- `docker logs spycam-suricata-live` 开头会打印实际监听的网卡（`live capture on interface xxx`）
 - 独立 Suricata 实例以 af-packet 模式监听 `LIVE_IFACE`，worker 每秒尾随 `eve-out/live/eve.json` 入库，前端经 SSE 收到 `live` 事件即刷新；实测包→入库 0.2–0.5s
 - 规则启停对实时引擎同样生效（容器内 watcher 检测 rules-active 变化后发 USR2 热重载）
 - `live/eve.json` 超过 `LIVE_EVE_MAX_MB`（默认 100）自动轮转为 `eve.json.1` 并 SIGHUP 重开；worker 按 inode 识别轮转，先读完旧文件剩余部分再切新文件（实测 1MB 阈值轮转无报错、入库不中断）
-- 引擎状态页始终显示「实时抓包引擎」卡片：未启用时显示“未启用”及接入步骤（当前 `LIVE_IFACE`、启动命令、镜像流量方式），启用后展示实时实例 stats（`engine_stats.source`），60 秒无更新标记为“已停止”。Web 不能启停容器（不挂载 docker.sock），启停只能在服务器上执行 compose 命令
+- 引擎状态页的「实时抓包引擎」卡片只展示状态（抓包中/已停止/未运行）和实时实例 stats（`engine_stats.source`），60 秒无更新标记为“已停止”。界面不放操作说明，部署与接入以本文档为准；Web 不能启停容器（不挂载 docker.sock）
 - Docker Desktop（Windows/macOS）的 host 网络是虚拟机网卡，只能看到 VM 自身流量（实测可捕获容器外联 HTTP 并触发 C2 心跳规则），看不到宿主局域网；本机演示可设 `LIVE_NETWORK_MODE=bridge`
 
 ### 部署到 Linux 服务器长期运行
@@ -73,16 +74,19 @@ sudo systemctl enable --now docker
 ip -br link
 # 3. 关闭网卡 GRO/LRO，避免内核合并报文导致 Suricata 看到超大包、规则漏报
 sudo ethtool -K eth1 gro off lro off
-# 4. 配置 .env：改掉默认密码/token，并设置
-#    LIVE_IFACE=eth1
+# 4. 配置 .env：改掉默认密码/token，并确认
+#    LIVE_IFACE=eth1                              # 留空则自动用默认路由网卡；接镜像口时必须指定
 #    LIVE_HOME_NET=[10.0.0.0/8,192.168.0.0/16]   # 受保护网段，影响规则方向判断
 #    LIVE_EVE_MAX_MB=100
 #    COOKIE_SECURE=true                           # 前面套 HTTPS 反代时开启
 cp .env.example .env && vi .env
-# 5. 启动（含实时抓包实例）
-docker compose --profile live up -d --build
-docker compose ps        # suricata-live 应为 running
+# 5. 启动（实时抓包实例常驻，随之启动）
+docker compose up -d --build
+docker compose ps        # 必须有 spycam-suricata-live 且为 running
+docker logs spycam-suricata-live 2>&1 | grep 'live capture on interface'
 docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
+# 6. 遇到问题时运行只读诊断脚本，把生成的 spycam-check.log 发给维护者（不含密码/token）
+sh scripts/server-check.sh
 ```
 
 流量从哪来（Suricata 只能分析流经 `LIVE_IFACE` 的报文）：

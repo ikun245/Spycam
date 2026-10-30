@@ -12,6 +12,30 @@ import (
 	"spycam/backend/internal/ingest"
 )
 
+func TestResolveIface(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "iface")
+	tl := &Tailer{Iface: "eth0", IfaceFile: f}
+	if got := tl.resolveIface(); got != "eth0" {
+		t.Fatalf("missing file should fall back to config, got %q", got)
+	}
+	if err := os.WriteFile(f, []byte("ens3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tl.resolveIface(); got != "ens3" {
+		t.Fatalf("file should win, got %q", got)
+	}
+	if err := os.WriteFile(f, []byte("bad;iface"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tl.resolveIface(); got != "eth0" {
+		t.Fatalf("invalid file content must be ignored, got %q", got)
+	}
+	if got := (&Tailer{}).resolveIface(); got != "auto" {
+		t.Fatalf("nothing configured should yield auto, got %q", got)
+	}
+}
+
 func TestIDsDeterministicAndDistinct(t *testing.T) {
 	uuidRe := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	p1, t1 := IDs("eth0")

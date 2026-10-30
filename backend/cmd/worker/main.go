@@ -75,14 +75,11 @@ func main() {
 
 	// 在线抓包（C1）：live profile 的 Suricata 把 eve 写到 live/eve.json，这里持续 tail 增量入库；
 	// 未启用 live profile 时文件不存在，tailer 只是空转等待。
-	liveIface := os.Getenv("LIVE_IFACE")
-	if liveIface == "" {
-		liveIface = "eth0"
-	}
 	tailer := &live.Tailer{
 		Pool: pool, Redis: rdb, Pub: pub,
 		EvePath:   filepath.Join(eveRoot, "live", "eve.json"),
-		Iface:     liveIface,
+		Iface:     os.Getenv("LIVE_IFACE"),
+		IfaceFile: filepath.Join(eveRoot, "live", "iface"),
 		AggWindow: cfg.AggWindowSeconds,
 	}
 	go tailer.Run(ctx)

@@ -34,9 +34,39 @@ type Tailer struct {
 	Redis     *redis.Client
 	Pub       *realtime.Publisher
 	EvePath   string
+	// Iface 为配置的网卡名；IfaceFile 存在时以 suricata-live 写出的实际网卡名为准（自动探测场景）
 	Iface     string
+	IfaceFile string
 	AggWindow int
 	Interval  time.Duration
+}
+
+// resolveIface 返回实际监听的网卡名：优先读取 IfaceFile，其次配置值，都没有时为 "auto"。
+func (t *Tailer) resolveIface() string {
+	if t.IfaceFile != "" {
+		if b, err := os.ReadFile(t.IfaceFile); err == nil {
+			if name := strings.TrimSpace(string(b)); validIface(name) {
+				return name
+			}
+		}
+	}
+	if validIface(t.Iface) {
+		return t.Iface
+	}
+	return "auto"
+}
+
+// validIface 与 entrypoint-live.sh 的白名单一致；Linux 网卡名最长 15 字节
+func validIface(s string) bool {
+	if s == "" || len(s) > 15 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // IDs 由网卡名确定性派生数据源与任务 ID：重启后继续写入同一任务，offset 也随之复用。
@@ -186,13 +216,14 @@ func (t *Tailer) Run(ctx context.Context) {
 			continue
 		}
 		if taskID == "" {
-			id, err := ensureTask(ctx, q, t.Iface)
+			iface := t.resolveIface()
+			id, err := ensureTask(ctx, q, iface)
 			if err != nil {
 				slog.Error("live ensure task", "err", err)
 				continue
 			}
 			taskID = id
-			slog.Info("live capture ingest started", "task_id", taskID, "iface", t.Iface, "path", t.EvePath)
+			slog.Info("live capture ingest started", "task_id", taskID, "iface", iface, "path", t.EvePath)
 		}
 		t.poll(ctx, taskID)
 	}
