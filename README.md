@@ -85,8 +85,8 @@ docker compose up -d --build
 docker compose ps        # 必须有 spycam-suricata-live 且为 running
 docker logs spycam-suricata-live 2>&1 | grep 'live capture on interface'
 docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
-# 6. 遇到问题时运行只读诊断脚本，把生成的 spycam-check.log 发给维护者（不含密码/token）
-sh scripts/server-check.sh
+# 6. 遇到问题时运行只读诊断脚本，把生成的 /tmp/spycam-check.log 发给维护者（不含密码/token）
+sh scripts/server-check.sh            # 脚本不在项目内时：sh server-check.sh /项目目录
 ```
 
 流量从哪来（Suricata 只能分析流经 `LIVE_IFACE` 的报文）：
