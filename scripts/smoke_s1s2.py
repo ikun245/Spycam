@@ -6,7 +6,7 @@ import time
 
 import requests
 
-BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8080")
+BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:28765")
 PCAP = sys.argv[1] if len(sys.argv) > 1 else "data/syn_scan_smoke.pcap"
 
 s = requests.Session()

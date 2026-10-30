@@ -5,7 +5,7 @@
 ## 架构
 
 ```text
-浏览器 ── web(nginx, 唯一对外，默认 127.0.0.1:8080，可由 WEB_BIND/WEB_PORT 调整)
+浏览器 ── web(nginx, 唯一对外，默认 127.0.0.1:28765，可由 WEB_BIND/WEB_PORT 调整)
             └─ /api 反代 ── api(Go: REST+SSE+鉴权) ── PostgreSQL(事实源)
                                   │                      Redis(队列/流/会话/PubSub)
             worker(Go: 队列消费/eve采集/聚合/事件串联)
@@ -40,7 +40,7 @@
 Copy-Item .env.example .env
 # 2. 一键启动（首次构建约 5-10 分钟）
 docker compose up -d
-# 3. 访问 http://127.0.0.1:8080 （默认账号见 .env 的 SEED_ADMIN_*）
+# 3. 访问 http://127.0.0.1:28765 （默认账号见 .env 的 SEED_ADMIN_*）
 ```
 
 数据自验（一条命令，产出 `validation/out/report.json|md`）：
@@ -96,11 +96,11 @@ docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
 
 #### 公网访问与端口
 
-整套系统只占用宿主机一个端口：`${WEB_BIND}:${WEB_PORT}`（默认 `127.0.0.1:8080`）。映射里的 `:80` 是容器内部端口，不占宿主机 80，与宿主机已有的 nginx 不冲突；postgres/redis/api 均不发布端口。8080 被占用时在 `.env` 改 `WEB_PORT`（如 `18080`）。
+整套系统只占用宿主机一个端口：`${WEB_BIND}:${WEB_PORT}`，默认是 `127.0.0.1:28765`。容器内 nginx 也监听 28765，不使用 80、8080 等常用端口，不会影响宿主机已有的 nginx 或其他 Web 服务。postgres、redis、api 都不发布端口。若 28765 已被占用，可在 `.env` 中修改 `WEB_PORT`。
 
-默认只绑回环地址，所以公网直接访问 `http://公网IP:8080` 打不开。三种方式任选：
+默认只绑定回环地址，所以公网直接访问 `http://公网IP:28765` 打不开。可选以下三种方式：
 
-1. **宿主机 nginx 反代（推荐，与现有站点共存）**：新增一个 server 或 location 反代到 `127.0.0.1:${WEB_PORT}`，配上证书后 `.env` 设 `COOKIE_SECURE=true`：
+1. **宿主机已有 nginx 反代（推荐）**：在现有 nginx 中新增一个按域名区分的 server，反代到 `127.0.0.1:28765`。它和已有站点共用 443，不额外占端口。配置证书后，在 `.env` 中设 `COOKIE_SECURE=true`：
 
    ```nginx
    server {
@@ -109,7 +109,7 @@ docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
        ssl_certificate     /etc/nginx/certs/spycam.crt;
        ssl_certificate_key /etc/nginx/certs/spycam.key;
        location / {
-           proxy_pass http://127.0.0.1:8080;
+           proxy_pass http://127.0.0.1:28765;
            proxy_set_header Host $host;
            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
            proxy_buffering off;        # 实时告警 SSE 需要
@@ -118,10 +118,10 @@ docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
    }
    ```
 
-   前端使用根路径 `/`，请用独立域名/端口的 server 块，不要挂在已有站点的子路径下。
+   前端使用根路径 `/`，请为它配置独立域名的 server 块，不要挂在已有站点的子路径下。
 
-2. **直接暴露端口（仅测试）**：`.env` 设 `WEB_BIND=0.0.0.0`、`WEB_PORT=18080`、`COOKIE_SECURE=false`，云安全组/防火墙放行 18080，访问 `http://公网IP:18080`。明文 HTTP 会暴露登录口令，不建议长期使用。
-3. **SSH 隧道**：`ssh -L 8080:127.0.0.1:8080 user@server` 后本地访问 `http://127.0.0.1:8080`。
+2. **直接暴露端口（仅测试）**：在 `.env` 中设 `WEB_BIND=0.0.0.0`、`COOKIE_SECURE=false`，在云安全组和防火墙中放行 28765，然后访问 `http://公网IP:28765`。明文 HTTP 会暴露登录口令，不建议长期使用。
+3. **SSH 隧道**：执行 `ssh -L 28765:127.0.0.1:28765 user@server`，然后在本地访问 `http://127.0.0.1:28765`。
 
 能打开页面但登录后立刻掉回登录页：基本是用 HTTP 访问却设了 `COOKIE_SECURE=true`（浏览器丢弃 Secure Cookie），改回 `false` 或换 HTTPS。改 `.env` 后需 `docker compose up -d` 重建容器生效。若改过 `SEED_ADMIN_PASSWORD` 但数据库已初始化，旧密码仍有效（种子只在首次创建）。
 

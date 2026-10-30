@@ -25,7 +25,7 @@
 
 ## 命令
 
-- `docker compose up -d` — 启动全部服务；仅 `web` 暴露 `127.0.0.1:8080`
+- `docker compose up -d` — 启动全部服务；仅 `web` 暴露 `127.0.0.1:28765`（禁止使用 80/8080 等常用端口）
 - `docker compose --profile tools run --rm validator` — 数据自验（即 `make validate` 的等价物）；Windows 无 make 时用 `scripts/` 下的 PowerShell 包装
 - 后端测试：`go test ./...`（backend 目录内）
 
