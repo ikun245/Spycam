@@ -217,7 +217,7 @@ ORDER BY
   CASE WHEN $10::text = 'dest_ip' AND NOT $11::bool THEN a.dest_ip END ASC,
   CASE WHEN $10::text = 'dest_ip' AND $11::bool THEN a.dest_ip END DESC,
   a.id DESC
-LIMIT $12 OFFSET $13
+LIMIT $13 OFFSET $12
 `
 
 type ListAlertsParams struct {
@@ -232,8 +232,8 @@ type ListAlertsParams struct {
 	TsTo         pgtype.Timestamptz `json:"ts_to"`
 	SortKey      string             `json:"sort_key"`
 	SortDesc     bool               `json:"sort_desc"`
-	PageLimit    int32              `json:"page_limit"`
 	PageOffset   int32              `json:"page_offset"`
+	PageLimit    int32              `json:"page_limit"`
 }
 
 type ListAlertsRow struct {
@@ -266,8 +266,8 @@ func (q *Queries) ListAlerts(ctx context.Context, arg ListAlertsParams) ([]ListA
 		arg.TsTo,
 		arg.SortKey,
 		arg.SortDesc,
-		arg.PageLimit,
 		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -346,4 +346,32 @@ func (q *Queries) ListUnGroupedAlerts(ctx context.Context, taskID string) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const taskAlertSummary = `-- name: TaskAlertSummary :one
+SELECT count(*)::bigint AS alert_count,
+       count(DISTINCT group_id)::bigint AS group_count,
+       min(ingested_at)::timestamptz AS first_ingested_at,
+       max(ingested_at)::timestamptz AS last_ingested_at
+FROM alerts WHERE task_id = $1
+`
+
+type TaskAlertSummaryRow struct {
+	AlertCount      int64              `json:"alert_count"`
+	GroupCount      int64              `json:"group_count"`
+	FirstIngestedAt pgtype.Timestamptz `json:"first_ingested_at"`
+	LastIngestedAt  pgtype.Timestamptz `json:"last_ingested_at"`
+}
+
+// 自验报告用：告警数、聚合组数（去重率）、首末入库时间（处理时延）
+func (q *Queries) TaskAlertSummary(ctx context.Context, taskID string) (TaskAlertSummaryRow, error) {
+	row := q.db.QueryRow(ctx, taskAlertSummary, taskID)
+	var i TaskAlertSummaryRow
+	err := row.Scan(
+		&i.AlertCount,
+		&i.GroupCount,
+		&i.FirstIngestedAt,
+		&i.LastIngestedAt,
+	)
+	return i, err
 }

@@ -330,12 +330,11 @@ def epoch_to_iso(e):
 def gen_variant_slow_scan():
     """变种 1：快扫 → 慢扫（SYN 间隔 2s）。
 
-    初版预判（错误）：detection_filter 20 次/10 秒，2s 间隔 10s 内只有 ≈5 个 SYN → 漏检。
-    实测：报了 48 条告警 → 预判修正：
-    Suricata 的 detection_filter track by_src 计数的是「自首次命中起窗口内」的包，
-    SYN 扫描持续 200 秒（100 包 × 2s），窗口滑动累计远超 20，因此在第 11 个包之后
-    持续触发（每个后续包都满足 count>=20）。真正的慢扫（如 30s+ 间隔、总量少）
-    才会漏检；本题的 200s 长慢扫仍被检出。
+    预判 miss：detection_filter 20 次/10 秒，计数窗口自首个计数包起 10s 后重置，
+    2s 间隔每个窗口只有 ≈5 个 SYN，永远到不了 20 → 漏检。
+    曾经的“修正”（agent-log Bug-26）：早期回放走常驻 unix-socket 引擎，阈值状态跨任务保留，
+    本变种与 syn_port_scan 同源 IP，计数被前一个 pcap 污染，出现过 48/73/26 条 hit，
+    当时据此把预判改成 hit——是被污染的结果误导。引擎改为每任务独立进程后稳定 0 条，原预判成立。
     """
     pkts = []
     for i, port in enumerate(range(20, 120)):
@@ -347,11 +346,10 @@ def gen_variant_slow_scan():
         "scenario": "variant_slow_scan",
         "benign": False,
         "variant_of": "syn_port_scan",
-        "prediction": "hit",
+        "prediction": "miss",
         "prediction_reason": (
-            "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——"
-            "detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，"
-            "超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。"
+            "detection_filter 20 次/10 秒，窗口 10s 后重置；2s 间隔每窗口仅约 5 个 SYN，到不了 20，慢扫可绕过。"
+            "早期曾因常驻引擎阈值状态跨任务污染出现 hit 并误改预判（Bug-26），引擎按任务隔离后稳定 miss"
         ),
         "expected_alerts": [],
         "known_limitations": [],

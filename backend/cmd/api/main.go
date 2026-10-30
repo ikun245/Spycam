@@ -18,7 +18,9 @@ import (
 	"spycam/backend/internal/engine"
 	"spycam/backend/internal/httpapi"
 	"spycam/backend/internal/observability"
+	"spycam/backend/internal/rules"
 	"spycam/backend/internal/store"
+	"spycam/backend/internal/store/gen"
 )
 
 func main() {
@@ -75,6 +77,7 @@ func main() {
 	}
 
 	agent := engine.NewClient(cfg.EngineAgentURL, cfg.EngineAgentToken)
+	syncActiveRules(ctx, pool, agent, cfg.RulesActiveDir)
 	srv := httpapi.NewServer(cfg, auth.NewService(pool, rdb, cfg.SessionTTL), agent, pool, rdb,
 		observability.HealthzHandler, observability.ReadyHandler(checks))
 
@@ -96,4 +99,32 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+}
+
+// syncActiveRules 启动时按数据库生成 rules-active：数据库是规则状态的唯一真相，
+// 引擎首次启动即可加载正确的启停状态；随后尽力触发一次重载，让已在运行的引擎吸收迁移带来的改动。
+func syncActiveRules(ctx context.Context, pool *pgxpool.Pool, agent *engine.Client, dir string) {
+	enabled, err := gen.New(pool).ListEnabledRules(ctx)
+	if err != nil {
+		slog.Error("list enabled rules", "err", err)
+		return
+	}
+	if err := rules.GenerateActiveFile(dir, enabled); err != nil {
+		slog.Error("generate active rules", "err", err)
+		return
+	}
+	slog.Info("rules-active generated", "enabled", len(enabled))
+	go func() {
+		for i := 0; i < 10; i++ {
+			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := agent.Reload(rctx)
+			cancel()
+			if err == nil {
+				slog.Info("engine reloaded with active rules")
+				return
+			}
+			time.Sleep(6 * time.Second)
+		}
+		slog.Warn("engine reload after startup did not succeed; rules apply on next change or engine restart")
+	}()
 }

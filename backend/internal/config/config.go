@@ -23,6 +23,8 @@ type Config struct {
 	SeedAdminUser     string
 	SeedAdminPassword string
 	AggWindowSeconds  int
+	// CookieSecure 为 true 时会话 Cookie 带 Secure（HTTPS 反代前部署时开启；本地 http://127.0.0.1 需关闭）
+	CookieSecure bool
 }
 
 // Load 读取环境变量并校验必填项，缺失即返回错误（fail fast）。
@@ -42,8 +44,8 @@ func Load() (*Config, error) {
 	}
 
 	for name, v := range map[string]string{
-		"DATABASE_URL":       c.DatabaseURL,
-		"ENGINE_AGENT_TOKEN": c.EngineAgentToken,
+		"DATABASE_URL":        c.DatabaseURL,
+		"ENGINE_AGENT_TOKEN":  c.EngineAgentToken,
 		"SEED_ADMIN_PASSWORD": c.SeedAdminPassword,
 	} {
 		if v == "" {
@@ -62,6 +64,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("%w: AGG_WINDOW_SECONDS must be positive int", ErrInvalidConfig)
 	}
 	c.AggWindowSeconds = agg
+
+	secure, err := strconv.ParseBool(getEnv("COOKIE_SECURE", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("%w: COOKIE_SECURE must be true/false", ErrInvalidConfig)
+	}
+	c.CookieSecure = secure
 
 	return c, nil
 }

@@ -68,7 +68,7 @@ func ingestFile(ctx context.Context, q *gen.Queries, taskID, path string) (Resul
 		line, err := readLine(reader)
 		if len(line) > 0 {
 			res.Events++
-			if perr := processLine(ctx, q, taskID, line); perr != nil {
+			if perr := processLine(ctx, q, taskID, SourceReplay, line); perr != nil {
 				res.Skipped++
 				slog.Warn("eve line skipped", "task_id", taskID, "err", perr)
 			} else if isAlert(line) {
@@ -84,26 +84,46 @@ func ingestFile(ctx context.Context, q *gen.Queries, taskID, path string) (Resul
 	}
 }
 
+// stats 事件来源：离线回放引擎与实时抓包引擎是两个独立实例，计数器不能混读。
+const (
+	SourceReplay = "replay"
+	SourceLive   = "live"
+)
+
 // LineHandler 处理一条完整的 eve 行；返回错误只计入 Skipped，不中断采集。
 type LineHandler func(line []byte) error
 
 // IngestFrom 从 offset 开始增量采集持续写入中的 eve.json（在线抓包 C1）。
 // 只消费以 '\n' 结尾的完整行：Suricata 正在写的半行留到下一轮，避免截断解析。
 // 返回新的 offset；文件被截断/轮转（size < offset）时从头开始。
-func IngestFrom(ctx context.Context, pool *pgxpool.Pool, taskID, path string, offset int64) (Result, int64, error) {
+func IngestFrom(ctx context.Context, pool *pgxpool.Pool, taskID, source, path string, offset int64) (Result, int64, error) {
 	q := gen.New(pool)
 	return scanFrom(path, offset, func(line []byte) error {
-		return processLine(ctx, q, taskID, line)
+		return processLine(ctx, q, taskID, source, line)
 	})
 }
 
 func scanFrom(path string, offset int64, handle LineHandler) (Result, int64, error) {
-	var res Result
 	f, err := os.Open(path)
 	if err != nil {
-		return res, offset, err
+		return Result{}, offset, err
 	}
 	defer f.Close()
+	return scanFile(f, offset, handle)
+}
+
+// IngestOpenFile 与 IngestFrom 相同，但读取调用方已打开的文件：调用方可先用同一句柄
+// 取文件身份（inode）再读，避免“判断轮转后、打开前”文件又被轮转的竞态。
+func IngestOpenFile(ctx context.Context, pool *pgxpool.Pool, taskID, source string, f *os.File, offset int64) (Result, int64, error) {
+	q := gen.New(pool)
+	return scanFile(f, offset, func(line []byte) error {
+		return processLine(ctx, q, taskID, source, line)
+	})
+}
+
+func scanFile(f *os.File, offset int64, handle LineHandler) (Result, int64, error) {
+	var res Result
+	path := f.Name()
 	st, err := f.Stat()
 	if err != nil {
 		return res, offset, err
@@ -184,7 +204,7 @@ func isAlert(line []byte) bool {
 	return false
 }
 
-func processLine(ctx context.Context, q *gen.Queries, taskID string, line []byte) error {
+func processLine(ctx context.Context, q *gen.Queries, taskID, source string, line []byte) error {
 	ev, err := eve.Parse(line)
 	if err != nil {
 		return err
@@ -304,6 +324,7 @@ func processLine(ctx context.Context, q *gen.Queries, taskID string, line []byte
 			KernelDrops: int8Ptr(ev.Stats.KernelDrops()),
 			AlertsTotal: int8Ptr(ev.Stats.Detect.Alert),
 			RulesFailed: int8Ptr(failed),
+			Source:      source,
 		})
 	default:
 		return nil // 其余类型只计数

@@ -110,7 +110,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "username and password required")
 		return
 	}
-	sid, _, err := s.auth.Login(r.Context(), req.Username, req.Password)
+	sid, _, err := s.auth.Login(r.Context(), req.Username, req.Password, clientIP(r))
 	if errors.Is(err, auth.ErrLocked) {
 		s.audit(r.Context(), req.Username, auditLoginLocked, req.Username, map[string]any{"ip": clientIP(r)})
 		writeErr(w, http.StatusTooManyRequests, "登录失败次数过多，请 15 分钟后再试")
@@ -127,6 +127,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    sid,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"username": req.Username})
@@ -137,7 +138,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.auth.Logout(r.Context(), c.Value)
 	}
 	s.audit(r.Context(), actor(r), auditLogout, actor(r), nil)
-	http.SetCookie(w, &http.Cookie{Name: "spycam_session", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "spycam_session", Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

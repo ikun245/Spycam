@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -187,8 +188,13 @@ func waitReplayDone(ctx context.Context, agent *engine.Client, taskID string, ti
 		if err != nil {
 			return err
 		}
-		// pcap-current 空闲时返回字符串 "None"，处理中返回 {filename:...}
+		// current 空闲时为字符串 "None"，处理中/排队中为 {filename:...}
 		if s, ok := st["current"].(string); ok && s == "None" {
+			if errs, ok := st["errors"].(map[string]any); ok {
+				if msg, ok := errs[taskID].(string); ok && msg != "" {
+					return errors.New(msg)
+				}
+			}
 			return nil // 引擎空闲：当前没有正在处理的 pcap
 		}
 		select {

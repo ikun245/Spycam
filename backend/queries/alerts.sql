@@ -59,3 +59,11 @@ SELECT * FROM flows WHERE task_id = $1 AND flow_id = $2;
 SELECT id, sid, src_ip, src_port, dest_ip, dest_port, proto, ts
 FROM alerts
 WHERE task_id = $1 AND group_id IS NULL;
+
+-- name: TaskAlertSummary :one
+-- 自验报告用：告警数、聚合组数（去重率）、首末入库时间（处理时延）
+SELECT count(*)::bigint AS alert_count,
+       count(DISTINCT group_id)::bigint AS group_count,
+       min(ingested_at)::timestamptz AS first_ingested_at,
+       max(ingested_at)::timestamptz AS last_ingested_at
+FROM alerts WHERE task_id = $1;

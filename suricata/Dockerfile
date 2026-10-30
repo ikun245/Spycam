@@ -1,5 +1,5 @@
 # 引擎镜像：Suricata 7.x + engine-agent（unix-socket 模式，见架构设计 §3.1/§3.2）
-FROM golang:1.25-alpine AS agentbuild
+FROM golang:1.26.10-alpine AS agentbuild
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download

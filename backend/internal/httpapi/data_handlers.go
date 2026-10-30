@@ -377,12 +377,21 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	task, err := gen.New(s.pool).GetTask(r.Context(), id.String())
+	q := gen.New(s.pool)
+	task, err := q.GetTask(r.Context(), id.String())
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "task not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, task)
+	sum, err := q.TaskAlertSummary(r.Context(), task.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		gen.ReplayTask
+		gen.TaskAlertSummaryRow
+	}{task, sum})
 }
 
 var errNotFound = errors.New("not found")

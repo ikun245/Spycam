@@ -80,6 +80,7 @@ type EngineStat struct {
 	AlertsPerMin pgtype.Int8        `json:"alerts_per_min"`
 	AlertsTotal  pgtype.Int8        `json:"alerts_total"`
 	RulesFailed  pgtype.Int8        `json:"rules_failed"`
+	Source       string             `json:"source"`
 }
 
 type Flow struct {

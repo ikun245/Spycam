@@ -46,9 +46,9 @@ func (q *Queries) CreateDnsEvent(ctx context.Context, arg CreateDnsEventParams) 
 }
 
 const createEngineStat = `-- name: CreateEngineStat :exec
-INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, kernel_drops, alerts_total, rules_failed)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (ts) DO NOTHING
+INSERT INTO engine_stats (ts, uptime_sec, rules_loaded, kernel_drops, alerts_total, rules_failed, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (source, ts) DO NOTHING
 `
 
 type CreateEngineStatParams struct {
@@ -58,6 +58,7 @@ type CreateEngineStatParams struct {
 	KernelDrops pgtype.Int8        `json:"kernel_drops"`
 	AlertsTotal pgtype.Int8        `json:"alerts_total"`
 	RulesFailed pgtype.Int8        `json:"rules_failed"`
+	Source      string             `json:"source"`
 }
 
 func (q *Queries) CreateEngineStat(ctx context.Context, arg CreateEngineStatParams) error {
@@ -68,6 +69,7 @@ func (q *Queries) CreateEngineStat(ctx context.Context, arg CreateEngineStatPara
 		arg.KernelDrops,
 		arg.AlertsTotal,
 		arg.RulesFailed,
+		arg.Source,
 	)
 	return err
 }

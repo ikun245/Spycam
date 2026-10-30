@@ -3,8 +3,8 @@
   "scenario": "variant_slow_scan",
   "benign": false,
   "variant_of": "syn_port_scan",
-  "prediction": "hit",
-  "prediction_reason": "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。",
+  "prediction": "miss",
+  "prediction_reason": "detection_filter 20 次/10 秒，窗口 10s 后重置；2s 间隔每窗口仅约 5 个 SYN，到不了 20，慢扫可绕过。早期曾因常驻引擎阈值状态跨任务污染出现 hit 并误改预判（Bug-26），引擎按任务隔离后稳定 miss",
   "expected_alerts": [],
   "known_limitations": []
 }

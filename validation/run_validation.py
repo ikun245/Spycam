@@ -26,6 +26,10 @@ def iso_to_dt(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def _fmt(v):
+    return "-" if v is None else v
+
+
 def parse_eve_ts(s):
     """兼容 Go RFC3339Nano（整秒无小数、Z 后缀、最多 9 位小数）与 Suricata +0000 格式。
     解析失败必须抛出而不是静默跳过，否则严格口径下会被误计为 FP。"""
@@ -153,6 +157,8 @@ def evaluate_one(session, gt):
 
     matched_ids = set()
     per_exp = []
+    alert_ts = {a["id"]: parse_eve_ts(a["ts"]) for a in alerts}
+    detect_delays = []
     for exp in gt["expected_alerts"]:
         ids = evaluate_expectation(exp, alerts)
         per_exp.append(
@@ -163,6 +169,10 @@ def evaluate_one(session, gt):
             }
         )
         matched_ids.update(ids)
+        # 检测时延（pcap 内时间）：期望窗起点 = 该攻击首包时间 → 首条命中告警
+        if ids and exp.get("window", {}).get("start"):
+            first = min(alert_ts[i] for i in ids)
+            detect_delays.append((first - iso_to_dt(exp["window"]["start"])).total_seconds())
 
     # 严格 §5.3：未被任何期望（sid+五元组+时间窗）匹配的告警一律计 FP，
     # 不因 sid 出现在期望集合里而豁免
@@ -181,6 +191,17 @@ def evaluate_one(session, gt):
     recall = tp / (tp + fn) if (tp + fn) else 1.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
+    # 处理时延（墙钟）：提交回放任务 → 首条/全部告警入库；离线回放的“包时间”是历史时间，
+    # 不能直接与入库墙钟相减，因此拆成检测时延 + 处理时延两段报告
+    pipe_first = pipe_last = None
+    if final.get("created_at") and final.get("first_ingested_at"):
+        created = parse_eve_ts(final["created_at"])
+        pipe_first = (parse_eve_ts(final["first_ingested_at"]) - created).total_seconds()
+        pipe_last = (parse_eve_ts(final["last_ingested_at"]) - created).total_seconds()
+    groups = final.get("group_count") or 0
+    # 参考口径：按 sid+源/目的主机对（忽略端口）计组数，用于说明五元组聚合键对扫描/爆破类告警为何几乎不压缩
+    hostpair_groups = len({(a["sid"], a["src_ip"], a.get("dest_ip")) for a in alerts})
+
     return {
         "scenario": gt["scenario"],
         "pcap": gt["pcap"],
@@ -195,6 +216,17 @@ def evaluate_one(session, gt):
         "precision": round(precision, 4),
         "recall": round(recall, 4),
         "f1": round(f1, 4),
+        "detect_delay_s": {
+            "mean": round(sum(detect_delays) / len(detect_delays), 3) if detect_delays else None,
+            "max": round(max(detect_delays), 3) if detect_delays else None,
+        },
+        "pipeline_latency_s": {
+            "first_alert": round(pipe_first, 3) if pipe_first is not None else None,
+            "all_alerts": round(pipe_last, 3) if pipe_last is not None else None,
+        },
+        "group_count": groups,
+        "dedup_rate": round(1 - groups / len(alerts), 4) if alerts and groups else None,
+        "hostpair_group_count": hostpair_groups,
         "expectations": per_exp,
         "fp_samples": [
             {
@@ -242,6 +274,22 @@ def main():
     alert_precision = matched_total / alerts_total if alerts_total else 1.0
     pred_ok = sum(1 for v in variants if v["prediction_correct"])
 
+    def _vals(key, sub):
+        return [s[key][sub] for s in scenarios if s[key][sub] is not None]
+
+    det_mean, det_max = _vals("detect_delay_s", "mean"), _vals("detect_delay_s", "max")
+    pipe_all = _vals("pipeline_latency_s", "all_alerts")
+    groups_total = sum(s["group_count"] for s in scenarios)
+    latency = {
+        "detect_delay_mean_s": round(sum(det_mean) / len(det_mean), 3) if det_mean else None,
+        "detect_delay_max_s": max(det_max) if det_max else None,
+        "pipeline_latency_mean_s": round(sum(pipe_all) / len(pipe_all), 3) if pipe_all else None,
+        "pipeline_latency_max_s": max(pipe_all) if pipe_all else None,
+    }
+    dedup_rate = round(1 - groups_total / alerts_total, 4) if alerts_total and groups_total else None
+    hostpair_total = sum(s["hostpair_group_count"] for s in scenarios)
+    hostpair_rate = round(1 - hostpair_total / alerts_total, 4) if alerts_total and hostpair_total else None
+
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "criteria": (
@@ -258,6 +306,11 @@ def main():
             "alert_count": alerts_total,
             "matched_alert_count": matched_total,
             "alert_precision": round(alert_precision, 4),
+            "group_count": groups_total,
+            "dedup_rate": dedup_rate,
+            "hostpair_group_count": hostpair_total,
+            "hostpair_dedup_rate": hostpair_rate,
+            **latency,
             "variant_predictions_correct": f"{pred_ok}/{len(variants)}",
         },
         "scenarios": scenarios,
@@ -278,13 +331,25 @@ def main():
         f"Precision={report['overall']['precision']} Recall={report['overall']['recall']}；"
         f"告警级 Precision={report['overall']['alert_precision']}（{matched_total}/{alerts_total}）",
         "",
-        "| 场景 | pcap | 告警数 | 匹配告警 | TP | FP | FN | P | R | F1 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        f"告警时延：检测时延（pcap 内时间，攻击首包 → 首条命中告警）均值 {latency['detect_delay_mean_s']}s / "
+        f"最大 {latency['detect_delay_max_s']}s；处理时延（墙钟，提交回放 → 全部告警入库）均值 "
+        f"{latency['pipeline_latency_mean_s']}s / 最大 {latency['pipeline_latency_max_s']}s。"
+        "离线回放的包时间戳是历史时间，故拆成两段；实时抓包（live profile）包 → 入库实测见自验报告",
+        "",
+        f"去重率：原始告警 {alerts_total} 条 → 聚合 {groups_total} 组，去重率 {dedup_rate}（1 - 组数/告警数）。"
+        f"聚合键按需求 S1 为“同签名+同五元组”，扫描换目的端口、爆破/心跳/隧道每次新建连接换源端口，五元组几乎不重复，"
+        f"因此该口径下压缩有限；参考口径“同签名+同主机对”为 {hostpair_total} 组（去重率 {hostpair_rate}），"
+        "这一层归并由 S3 事件串联承担",
+        "",
+        "| 场景 | pcap | 告警数 | 匹配告警 | TP | FP | FN | P | R | F1 | 检测时延 均值/最大(s) | 处理时延(s) | 聚合组 | 去重率 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for s in scenarios:
+        d, p = s["detect_delay_s"], s["pipeline_latency_s"]
         lines.append(
             f"| {s['scenario']} | {s['pcap']} | {s['alert_count']} | {s['matched_alert_count']} | {s['tp']} | "
-            f"{s['fp']} | {s['fn']} | {s['precision']} | {s['recall']} | {s['f1']} |"
+            f"{s['fp']} | {s['fn']} | {s['precision']} | {s['recall']} | {s['f1']} | "
+            f"{_fmt(d['mean'])}/{_fmt(d['max'])} | {_fmt(p['all_alerts'])} | {s['group_count']} | {_fmt(s['dedup_rate'])} |"
         )
     if variants:
         lines += [

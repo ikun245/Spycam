@@ -1,27 +1,51 @@
 {
-  "generated_at": "2026-10-29T12:41:21.630575+00:00",
-  "criteria": "需求梳理 §5.3：TP=sid+五元组+时间窗全匹配；FP=负样本任意告警或未匹配期望的告警",
+  "generated_at": "2026-10-30T05:46:09.421377+00:00",
+  "criteria": "需求梳理 §5.3（严格口径）：TP=期望条目被 sid+五元组+时间窗全匹配的告警命中；FN=期望条目无命中；FP=负样本任意告警，或攻击样本中未匹配任何期望条目的告警（不按 sid 豁免）。alert_precision=被期望匹配的告警数/总告警数，作为告警级补充指标",
   "overall": {
-    "tp": 10,
+    "tp": 15,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
-    "recall": 1.0
+    "recall": 1.0,
+    "alert_count": 854,
+    "matched_alert_count": 854,
+    "alert_precision": 1.0,
+    "group_count": 854,
+    "dedup_rate": 0.0,
+    "hostpair_group_count": 15,
+    "hostpair_dedup_rate": 0.9824,
+    "detect_delay_mean_s": 1.683,
+    "detect_delay_max_s": 6.025,
+    "pipeline_latency_mean_s": 6.307,
+    "pipeline_latency_max_s": 8.175,
+    "variant_predictions_correct": "3/3"
   },
   "scenarios": [
     {
       "scenario": "benign_mixed_traffic",
       "pcap": "benign_mix.pcap",
       "benign": true,
-      "task_id": "86c11ec4-6c81-48b0-a67f-4935a3502e84",
+      "task_id": "94d6d48e-61fe-4e4a-9b84-fac42b3c2d57",
       "task_status": "done",
       "alert_count": 0,
+      "matched_alert_count": 0,
       "tp": 0,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": null,
+        "max": null
+      },
+      "pipeline_latency_s": {
+        "first_alert": null,
+        "all_alerts": null
+      },
+      "group_count": 0,
+      "dedup_rate": null,
+      "hostpair_group_count": 0,
       "expectations": [],
       "fp_samples": []
     },
@@ -29,15 +53,27 @@
       "scenario": "c2_beacon",
       "pcap": "c2_beacon.pcap",
       "benign": false,
-      "task_id": "04242ec7-29fc-4997-8d70-3321b012f9ac",
+      "task_id": "27be1770-e744-4496-8eeb-022b5f49b485",
       "task_status": "done",
       "alert_count": 40,
+      "matched_alert_count": 40,
       "tp": 2,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": 5.025,
+        "max": 6.025
+      },
+      "pipeline_latency_s": {
+        "first_alert": 5.049,
+        "all_alerts": 5.422
+      },
+      "group_count": 40,
+      "dedup_rate": 0.0,
+      "hostpair_group_count": 2,
       "expectations": [
         {
           "sid": 1000006,
@@ -56,19 +92,36 @@
       "scenario": "dns_tunnel",
       "pcap": "dns_tunnel.pcap",
       "benign": false,
-      "task_id": "71b2af33-4545-4379-ba4f-ead791a7bd53",
+      "task_id": "cc6d8e88-cea1-4efb-a841-79f512f64957",
       "task_status": "done",
       "alert_count": 160,
-      "tp": 1,
+      "matched_alert_count": 160,
+      "tp": 2,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": 0.0,
+        "max": 0.0
+      },
+      "pipeline_latency_s": {
+        "first_alert": 5.017,
+        "all_alerts": 6.608
+      },
+      "group_count": 160,
+      "dedup_rate": 0.0,
+      "hostpair_group_count": 2,
       "expectations": [
         {
           "sid": 1000005,
-          "matched": 64,
+          "matched": 80,
+          "min_count": 1
+        },
+        {
+          "sid": 1000005,
+          "matched": 80,
           "min_count": 1
         }
       ],
@@ -78,29 +131,41 @@
       "scenario": "syn_port_scan",
       "pcap": "scan_syn.pcap",
       "benign": false,
-      "task_id": "479f456c-e6e5-4924-b83e-e6015eb82173",
+      "task_id": "b114b68f-04b7-4f42-a8b8-03ea5882cc7b",
       "task_status": "done",
       "alert_count": 234,
+      "matched_alert_count": 234,
       "tp": 3,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": 0.267,
+        "max": 0.8
+      },
+      "pipeline_latency_s": {
+        "first_alert": 5.018,
+        "all_alerts": 6.051
+      },
+      "group_count": 234,
+      "dedup_rate": 0.0,
+      "hostpair_group_count": 3,
       "expectations": [
         {
           "sid": 1000001,
-          "matched": 75,
+          "matched": 78,
           "min_count": 1
         },
         {
           "sid": 1000001,
-          "matched": 75,
+          "matched": 78,
           "min_count": 1
         },
         {
           "sid": 1000001,
-          "matched": 74,
+          "matched": 78,
           "min_count": 1
         }
       ],
@@ -110,24 +175,36 @@
       "scenario": "ssh_bruteforce",
       "pcap": "ssh_bruteforce.pcap",
       "benign": false,
-      "task_id": "ce521367-74f5-4899-963e-5a724df9dbc4",
+      "task_id": "2b2df359-5400-4de1-bdda-f532198510c1",
       "task_status": "done",
       "alert_count": 60,
+      "matched_alert_count": 60,
       "tp": 2,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": 2.75,
+        "max": 5.0
+      },
+      "pipeline_latency_s": {
+        "first_alert": 5.021,
+        "all_alerts": 5.277
+      },
+      "group_count": 60,
+      "dedup_rate": 0.0,
+      "hostpair_group_count": 2,
       "expectations": [
         {
           "sid": 1000002,
-          "matched": 15,
+          "matched": 30,
           "min_count": 1
         },
         {
           "sid": 1000002,
-          "matched": 13,
+          "matched": 30,
           "min_count": 1
         }
       ],
@@ -137,16 +214,48 @@
       "scenario": "web_sqli_xss",
       "pcap": "web_attacks.pcap",
       "benign": false,
-      "task_id": "4cc8baea-58b4-443d-a786-2cf05ca723cd",
+      "task_id": "f0a9e344-1304-4446-ba25-332ba57a7e04",
       "task_status": "done",
       "alert_count": 360,
-      "tp": 2,
+      "matched_alert_count": 360,
+      "tp": 6,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "detect_delay_s": {
+        "mean": 0.375,
+        "max": 0.725
+      },
+      "pipeline_latency_s": {
+        "first_alert": 5.02,
+        "all_alerts": 8.175
+      },
+      "group_count": 360,
+      "dedup_rate": 0.0,
+      "hostpair_group_count": 6,
       "expectations": [
+        {
+          "sid": 1000003,
+          "matched": 80,
+          "min_count": 1
+        },
+        {
+          "sid": 1000004,
+          "matched": 40,
+          "min_count": 1
+        },
+        {
+          "sid": 1000003,
+          "matched": 80,
+          "min_count": 1
+        },
+        {
+          "sid": 1000004,
+          "matched": 40,
+          "min_count": 1
+        },
         {
           "sid": 1000003,
           "matched": 80,
@@ -166,11 +275,11 @@
       "scenario": "variant_slow_scan",
       "variant_of": "syn_port_scan",
       "pcap": "variant_slow_scan.pcap",
-      "prediction": "hit",
-      "prediction_reason": "初版预判 miss（以为 10s 窗口内只有 5 个包），实测 hit（48 条）——detection_filter 的窗口从首个命中包起滑动计数，200 秒的扫描全程累计 100 个 SYN，超过 count 20 后每包都告警。只有『短总量』的慢扫（如 10 个包跑 200s）才会真正漏检。",
+      "prediction": "miss",
+      "prediction_reason": "detection_filter 20 次/10 秒，窗口 10s 后重置；2s 间隔每窗口仅约 5 个 SYN，到不了 20，慢扫可绕过。早期曾因常驻引擎阈值状态跨任务污染出现 hit 并误改预判（Bug-26），引擎按任务隔离后稳定 miss",
       "actual_alert_count": 0,
       "actual": "miss",
-      "prediction_correct": false,
+      "prediction_correct": true,
       "sids": []
     },
     {

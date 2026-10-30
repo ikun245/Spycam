@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,84 @@ func ensureTask(ctx context.Context, q *gen.Queries, iface string) (string, erro
 
 func offsetKey(taskID string) string { return "live:eve_offset:" + taskID }
 
+// cursor 记录读到哪个文件（inode）的哪个字节位置；Redis 中存为 "inode:offset"。
+type cursor struct {
+	Ino uint64
+	Off int64
+}
+
+func (c cursor) String() string { return fmt.Sprintf("%d:%d", c.Ino, c.Off) }
+
+// parseCursor 兼容旧格式（只有 offset 的纯数字）；无法解析时从头开始。
+func parseCursor(s string) cursor {
+	if s == "" {
+		return cursor{}
+	}
+	if ino, off, ok := strings.Cut(s, ":"); ok {
+		i, err1 := strconv.ParseUint(ino, 10, 64)
+		o, err2 := strconv.ParseInt(off, 10, 64)
+		if err1 == nil && err2 == nil && o >= 0 {
+			return cursor{Ino: i, Off: o}
+		}
+		return cursor{}
+	}
+	if o, err := strconv.ParseInt(s, 10, 64); err == nil && o >= 0 {
+		return cursor{Off: o}
+	}
+	return cursor{}
+}
+
+// rotatedSuffix 与 entrypoint-live.sh 的轮转约定一致：eve.json → eve.json.1 后 SIGHUP 让 Suricata 重新打开。
+const rotatedSuffix = ".1"
+
+type readFn func(f *os.File, offset int64) (ingest.Result, int64, error)
+
+// advance 从游标继续读取 path；检测到轮转（inode 变化，或无 inode 时文件变短）时，
+// 先把旧文件（path+".1"）剩余部分读完，再从新文件开头读，保证轮转不丢告警。
+func advance(path string, c cursor, read readFn) (cursor, ingest.Result, error) {
+	var total ingest.Result
+	f, err := os.Open(path)
+	if err != nil {
+		return c, total, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return c, total, err
+	}
+	ino := fileID(fi)
+	rotated := fi.Size() < c.Off
+	if c.Ino != 0 && ino != 0 {
+		rotated = c.Ino != ino
+	}
+	if rotated {
+		if old, oerr := os.Open(path + rotatedSuffix); oerr == nil {
+			if ofi, serr := old.Stat(); serr == nil &&
+				(c.Ino == 0 || fileID(ofi) == c.Ino) && ofi.Size() >= c.Off {
+				r, _, rerr := read(old, c.Off)
+				addResult(&total, r)
+				if rerr != nil {
+					slog.Warn("live drain rotated eve", "err", rerr)
+				}
+			}
+			old.Close()
+		}
+		slog.Info("live eve rotated, switching to new file", "path", path)
+		c = cursor{}
+	}
+	c.Ino = ino
+	r, next, err := read(f, c.Off)
+	addResult(&total, r)
+	c.Off = next
+	return c, total, err
+}
+
+func addResult(dst *ingest.Result, r ingest.Result) {
+	dst.Events += r.Events
+	dst.Alerts += r.Alerts
+	dst.Skipped += r.Skipped
+}
+
 // Run 阻塞运行直到 ctx 取消。eve.json 尚不存在（未启用 live profile）时静默等待。
 func (t *Tailer) Run(ctx context.Context) {
 	q := gen.New(t.Pool)
@@ -120,14 +199,17 @@ func (t *Tailer) Run(ctx context.Context) {
 }
 
 func (t *Tailer) poll(ctx context.Context, taskID string) {
-	offset, err := t.Redis.Get(ctx, offsetKey(taskID)).Int64()
+	raw, err := t.Redis.Get(ctx, offsetKey(taskID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		slog.Warn("live offset read", "task_id", taskID, "err", err)
 		return
 	}
-	res, next, err := ingest.IngestFrom(ctx, t.Pool, taskID, t.EvePath, offset)
-	if next != offset {
-		if serr := t.Redis.Set(ctx, offsetKey(taskID), strconv.FormatInt(next, 10), 0).Err(); serr != nil {
+	cur := parseCursor(raw)
+	next, res, err := advance(t.EvePath, cur, func(f *os.File, off int64) (ingest.Result, int64, error) {
+		return ingest.IngestOpenFile(ctx, t.Pool, taskID, ingest.SourceLive, f, off)
+	})
+	if next != cur {
+		if serr := t.Redis.Set(ctx, offsetKey(taskID), next.String(), 0).Err(); serr != nil {
 			slog.Warn("live offset save", "task_id", taskID, "err", serr)
 		}
 	}

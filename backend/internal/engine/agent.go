@@ -8,17 +8,34 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // suricataConfig 在镜像内的路径；不放 /etc/suricata（基础镜像把它声明为 VOLUME，重建容器不会更新）。
 const suricataConfig = "/opt/spycam/suricata.yaml"
+
+// 规则目录选择与 suricata/rules-path.sh 一致：rules-active 存在且非空时优先，否则回退镜像内置规则。
+const (
+	activeRulesDir  = "/opt/spycam/rules-active"
+	builtinRulesDir = "/opt/spycam/rules"
+	replayTimeout   = 5 * time.Minute
+	maxReplayErrors = 100
+)
+
+func rulesDir() string {
+	if fi, err := os.Stat(activeRulesDir + "/spycam.rules"); err == nil && fi.Size() > 0 {
+		return activeRulesDir
+	}
+	return builtinRulesDir
+}
 
 // Status 是引擎运行状态的只读视图。未测得的字段省略（omitempty），避免前端把“未知”显示成 0。
 type Status struct {
@@ -36,11 +53,19 @@ type AgentServer struct {
 	socketPat string
 	// lastReloadMs 最近一次「suricata -T 校验 + 热重载」耗时；0 表示自 agent 启动后未重载过
 	lastReloadMs atomic.Int64
+
+	// 回放：每个任务一个独立的 `suricata -r` 进程，串行执行（runMu）。
+	// mu 保护 queued/current/errors，供 replay-status 查询。
+	runMu   sync.Mutex
+	mu      sync.Mutex
+	queued  int
+	current string
+	errors  map[string]string
 }
 
 // NewAgentServer 构造 agent 服务端。
 func NewAgentServer(token, suriBin, socketPath string) *AgentServer {
-	return &AgentServer{token: token, suriBin: suriBin, socketPat: socketPath}
+	return &AgentServer{token: token, suriBin: suriBin, socketPat: socketPath, errors: map[string]string{}}
 }
 
 // Handler 返回挂载好的路由（标准库 mux，agent 镜像内不引 chi 也可以，这里统一用 chi 之外的最小依赖）。
@@ -54,23 +79,24 @@ func (a *AgentServer) Handler() http.Handler {
 	return mux
 }
 
-// handleReplayStatus 转发 pcap-current / pcap-file-number，
-// worker 据此判断回放是否完成（Suricata 按任务串行处理）。
-func (a *AgentServer) handleReplayStatus(w http.ResponseWriter, r *http.Request) {
-	cmd := NewSuricataCmd(a.socketPat, 10*time.Second)
-	out := map[string]any{}
-	for name, key := range map[string]string{
-		"pcap-current":     "current",
-		"pcap-file-number": "queued",
-	} {
-		msg, err := cmd.Do(r.Context(), name, nil)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-			return
-		}
-		out[key] = msg
+// handleReplayStatus 返回回放队列状态，格式沿用 Suricata pcap-current 的约定：
+// 空闲时 current 为字符串 "None"；errors 按 task_id 记录失败原因，worker 据此判定任务失败。
+func (a *AgentServer) handleReplayStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.replayState())
+}
+
+func (a *AgentServer) replayState() map[string]any {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var current any = "None"
+	if a.current != "" || a.queued > 0 {
+		current = map[string]any{"filename": a.current}
 	}
-	writeJSON(w, http.StatusOK, out)
+	errs := make(map[string]string, len(a.errors))
+	for k, v := range a.errors {
+		errs[k] = v
+	}
+	return map[string]any{"current": current, "queued": a.queued, "errors": errs}
 }
 
 func (a *AgentServer) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -100,8 +126,10 @@ type replayRequest struct {
 	PcapID string `json:"pcap_id"`
 }
 
-// handleReplay 经 unix socket 提交 pcap-file 命令：引擎在同一容器内读 pcaps 卷，
+// handleReplay 为每个任务启动独立的 `suricata -r` 进程：引擎在同一容器内读 pcaps 卷，
 // 输出写到按任务隔离的目录 eve-out/tasks/<task_id>/（架构设计 §3.1）。
+// 不再经 unix-socket 常驻实例的 pcap-file 命令：常驻实例的 host/阈值状态跨任务保留，
+// detection_filter 等有状态规则会被前一个 pcap 污染，同一 pcap 重放结果不稳定（agent-log Bug-26）。
 func (a *AgentServer) handleReplay(w http.ResponseWriter, r *http.Request) {
 	var req replayRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
@@ -114,22 +142,64 @@ func (a *AgentServer) handleReplay(w http.ResponseWriter, r *http.Request) {
 	}
 	pcapPath := "/data/pcaps/" + req.PcapID + ".pcap"
 	outDir := "/var/log/suricata/tasks/" + req.TaskID
-	// Suricata pcap-file 要求输出目录必须已存在
+	// Suricata 要求输出目录必须已存在；同步创建，worker 收到响应后即可等待该目录
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create output dir: " + err.Error()})
 		return
 	}
 
-	cmd := NewSuricataCmd(a.socketPat, 60*time.Second)
-	msg, err := cmd.Do(r.Context(), "pcap-file", map[string]string{
-		"filename":   pcapPath,
-		"output-dir": outDir,
-	})
+	// 入队计数须在响应前完成，否则 worker 立刻查询状态会误判为“已空闲”
+	a.mu.Lock()
+	a.queued++
+	a.mu.Unlock()
+	go a.runReplay(req.TaskID, pcapPath, outDir)
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "output_dir": outDir, "engine": "queued"})
+}
+
+func (a *AgentServer) runReplay(taskID, pcapPath, outDir string) {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	a.mu.Lock()
+	a.queued--
+	a.current = pcapPath
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.current = ""
+		a.mu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), replayTimeout)
+	defer cancel()
+	start := time.Now()
+	// 参数数组，绝不 sh -c（M7）；关闭 unix-command，避免与常驻实例争用 socket
+	cmd := exec.CommandContext(ctx, a.suriBin,
+		"-r", pcapPath,
+		"-c", suricataConfig,
+		"--set", "default-rule-path="+rulesDir(),
+		"--set", "unix-command.enabled=no",
+		"-l", outDir)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		msg := fmt.Sprintf("suricata -r failed: %v: %s", err, tail(string(out), 500))
+		slog.Error("replay failed", "task_id", taskID, "err", msg)
+		a.mu.Lock()
+		if len(a.errors) >= maxReplayErrors {
+			a.errors = map[string]string{}
+		}
+		a.errors[taskID] = msg
+		a.mu.Unlock()
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "output_dir": outDir, "engine": msg})
+	slog.Info("replay done", "task_id", taskID, "elapsed_ms", time.Since(start).Milliseconds())
+}
+
+func tail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		return s[len(s)-n:]
+	}
+	return s
 }
 
 func (a *AgentServer) handleReload(w http.ResponseWriter, r *http.Request) {

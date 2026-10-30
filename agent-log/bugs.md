@@ -184,3 +184,46 @@
 - **原因**：Bug-5 当时只用 `--renew-anon-volumes` 绕过，记录里写的“长期方案”没有实施。任何普通 `up -d` 都会复用旧匿名卷，配置与内置规则改动全部静默失效；评审者照 README 复跑时同样会中招
 - **修复**：自有配置与内置规则全部移出 VOLUME 路径——`/opt/spycam/suricata.yaml`、`/opt/spycam/rules`、`/opt/spycam/rules-active`（只读挂载）；engine-agent 的 `-c` 参数改用常量 `suricataConfig`。之后普通 `up -d` 即可生效，README 中的 `--renew-anon-volumes` 说明一并删除
 - **教训**：bug 记录里写的“长期方案”要么当场做，要么进 README 已知缺陷；只写在 bugs.md 里等于没做
+
+## Bug-22：引擎启动后找不到活动规则——rules-active 只在“改规则”时生成
+
+- **日期**：2026-10-30（修 Bug-20 后复查干净安装路径发现） ｜ **引入位置**：`backend/cmd/api/main.go`
+- **现象**：干净安装（新卷）首次 `up`，Suricata 等待 60s 后回退到内置规则；此后不改规则就一直在用内置路径，UI 新建的规则不生效
+- **原因**：Bug-20 修复让引擎读取 `rules-active`，但该文件只在规则启停/新建的 handler 里生成，启动时没人写
+- **修复**：api 启动时用 `ListEnabledRules` 生成 rules-active，再在后台重试调用 agent 重载（10 次，每次间隔 6s）
+- **验证**：重建后 api 日志依次出现 `rules-active generated enabled=7` 和 `engine reloaded with active rules`
+
+## Bug-23：实时引擎的 stats 覆盖回放 stats，引擎状态页数字混用
+
+- **日期**：2026-10-30（自查发现） ｜ **引入位置**：`backend/migrations/0001` `engine_stats` 主键 `ts`、`LatestEngineStat`
+- **现象**：开启 live 后，引擎状态页的已加载规则数、告警累计在两个实例之间跳动
+- **原因**：两个 Suricata 实例写同一张表，查询取 ts 最大的一条。回放 stats 的 ts 是 pcap 时间（通常是过去），实时是墙钟，所以永远显示实时实例；两边 ts 恰好相同时还会 ON CONFLICT 互相覆盖
+- **修复**：迁移 0004 加 `source` 列，主键改为 `(source, ts)`；API 分别返回 `latest_stats` 与 `live_stats`，前端分两组卡片展示
+- **验证**：库内 replay 104 行与 live 7 行分开；`/engine/status` 两组 ts 各自正确
+
+## Bug-24：规则构建器生成 `classtype:custom`，不在 classification.config 中
+
+- **日期**：2026-10-30（README 已知缺陷收口） ｜ **引入位置**：`backend/internal/httpapi/rule_create_handler.go`
+- **现象**：每次重载引擎都输出 classtype 未知警告；规则也没有 priority，所有自定义规则在 Suricata 视角同级
+- **修复**：按攻击阶段映射到标准 classtype（recon→attempted-recon 等 5 项），并写入 `priority:<severity>`；迁移 0003 修正库中已有的自定义规则
+- **验证**：sid 2000001 的 raw 中已无 `classtype:custom`，classtype 列为 `web-application-attack`
+
+## Bug-25：Go 工具链与依赖存在 15 个可达漏洞——安全扫描被“工具不好装”拖成了已知缺陷
+
+- **日期**：2026-10-30 ｜ **引入位置**：`backend/go.mod`、三个 Dockerfile 的 `golang:1.25-alpine`
+- **现象**：此前 README 写“govulncheck 未执行（宿主 32 位 Go 受限）”。改在 `golang` 容器里挂宿主模块缓存运行后，报告代码可达的漏洞 15 个：标准库 net/http、crypto/tls、crypto/x509、net/textproto 共 11 个（1.25.14 无修复，需 1.26.9+）；pgx v5.7.1、go-redis v9.7.0 各 1 个；x/text v0.19.0 2 个
+- **原因**：AI 初始化项目时选的依赖版本是训练数据里的“熟悉版本”，未在当时做漏洞扫描；之后又把扫描当成“环境问题”挂在已知缺陷里，没有换一条路去跑
+- **修复**：构建镜像固定 `golang:1.26.10-alpine`（完整版本号，不再用浮动的 `1.25-alpine`）；pgx→v5.9.2、go-redis→v9.7.3、x/text→v0.41.0
+- **验证**：同一容器内 `go vet` 与 `go test ./...` 全过；govulncheck 输出 `No vulnerabilities found`；重建镜像后完整自验回归
+- **附带踩坑**：第一次在容器里跑时，因为没挂模块缓存，在容器内从 proxy.golang.org 拉模块，结果 TLS 握手超时。挂载宿主 `GOMODCACHE` 后只需联网下载漏洞库。全程未使用任何镜像源
+- **教训**：工具装不上就换运行环境（容器），不要让“没扫”变成“声明没扫”。此外 PowerShell 两次误操作也记在这里：`R` 是 Invoke-History 的内置别名，用它当函数名会执行历史命令；`-replace` 替换串里的 `$1` 会被当成捕获组，把 SQL 参数 `$1` 吞掉。字符串替换一律改用 `.Replace()`
+
+## Bug-26：回放引擎跨任务保留阈值状态——同一 pcap 重放结果不稳定，还导致变异测试预判被误改
+
+- **日期**：2026-10-30（补 §5.4 指标后回归时发现） ｜ **引入位置**：`backend/internal/engine/agent.go` `handleReplay`（常驻 unix-socket 实例 + `pcap-file` 命令）
+- **现象**：`variant_slow_scan` 在几次回归中依次得到 48、73、26、0 条告警。把引擎重启后单独回放该 pcap 三次，结果是 0、0、36
+- **原因**：常驻 Suricata 的 host 表与 `detection_filter` 阈值状态在相邻 pcap 任务间不清空。慢扫变种和 `syn_port_scan` 用的是同一个源 IP，pcap 时间戳又都从同一基线开始，前一个任务的计数被带进后一个任务。unix-socket 没有重置状态的命令
+- **AI 的锅**：这个现象两次出现过，两次都被错误归因。第一次 AI 看到 hit（48 条）后，把原本正确的预判 miss“修正”为 hit，还编了一个“窗口从首个命中包起滑动累计”的引擎语义解释。第二次在自验报告里写了“计数状态跨任务持久”，但处理方式是“给场景分不同源 IP 规避”，没有修引擎。真实用户重放同一 pcap 也会得到不同结果，这是 M1/M6 层面的缺陷
+- **修复**：agent 为每个回放任务串行启动独立的 `suricata -r` 进程：参数数组，关闭 unix-command，规则目录选择与 rules-path.sh 一致，超时 5 分钟。入队计数在响应前同步完成，避免 worker 误判空闲。失败原因经 `replay-status.errors[task_id]` 回传，worker 据此把任务标记为失败，不再静默完成。常驻实例保留，用于热重载与状态。慢扫变种的预判恢复为 miss
+- **验证**：容器内同一 pcap 一次性运行两次，均为 0 条告警，单次约 0.5s；新增单测覆盖“入队即非空闲”和“进程失败带回原因”；validator 连续两轮结果一致（见 report.md）
+- **教训**：同一输入多次运行结果不同，说明存在隐藏状态，不能挑一个“合理”的结果去改预判。拿到与预判不符的结果时，第一步应该是在干净环境复现，而不是给结果编一套解释

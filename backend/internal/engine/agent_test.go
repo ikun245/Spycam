@@ -35,3 +35,28 @@ func TestHandleValidateRejectsBadInput(t *testing.T) {
 		})
 	}
 }
+
+// 回放状态：入队后（进程尚未启动）不得报告空闲；进程失败后空闲并在 errors 中带出原因。
+func TestReplayStateQueuedAndFailure(t *testing.T) {
+	a := NewAgentServer("tok", "/nonexistent/suricata", "/nonexistent.sock")
+	if got := a.replayState()["current"]; got != "None" {
+		t.Fatalf("idle current = %v, want None", got)
+	}
+	a.mu.Lock()
+	a.queued++
+	a.mu.Unlock()
+	if got := a.replayState()["current"]; got == "None" {
+		t.Fatal("queued task reported as idle")
+	}
+
+	const taskID = "11111111-1111-1111-1111-111111111111"
+	a.runReplay(taskID, "/nonexistent.pcap", t.TempDir())
+	st := a.replayState()
+	if st["current"] != "None" || st["queued"] != 0 {
+		t.Fatalf("after run: current=%v queued=%v", st["current"], st["queued"])
+	}
+	errs := st["errors"].(map[string]string)
+	if !strings.Contains(errs[taskID], "suricata -r failed") {
+		t.Fatalf("missing failure for task: %v", errs)
+	}
+}

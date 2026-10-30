@@ -46,4 +46,4 @@ WHERE ia.incident_id = $1
 ORDER BY ia.stage_order, g.first_seen;
 
 -- name: LatestEngineStat :one
-SELECT * FROM engine_stats ORDER BY ts DESC LIMIT 1;
+SELECT * FROM engine_stats WHERE source = $1 ORDER BY ts DESC LIMIT 1;

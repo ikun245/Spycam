@@ -19,20 +19,25 @@ var (
 	customActions   = map[string]bool{"alert": true}
 	customProtocols = map[string]bool{"tcp": true, "udp": true, "icmp": true, "http": true, "dns": true, "tls": true, "ssh": true}
 	customStages    = map[string]bool{"recon": true, "bruteforce": true, "exploit": true, "c2": true, "exfil": true}
+	// 按阶段映射到 classification.config 中已注册的 classtype（未注册的 classtype 会在引擎加载时报警告）
+	stageClasstypes = map[string]string{
+		"recon": "attempted-recon", "bruteforce": "attempted-admin", "exploit": "web-application-attack",
+		"c2": "command-and-control", "exfil": "policy-violation",
+	}
 )
 
 type createRuleRequest struct {
-	Action   string `json:"action"`   // alert
-	Protocol string `json:"protocol"` // tcp/udp/http/dns...
-	SrcIP    string `json:"src_ip"`   // 支持 any / 单 IP / CIDR
-	SrcPort  string `json:"src_port"` // any / 22 / [1:200] / [80,443]
-	DstIP    string `json:"dst_ip"`
-	DstPort  string `json:"dst_port"`
-	Content  string `json:"content"`           // 可选：匹配内容（自动 nocase）
-	Direction string `json:"direction"`        // -> 或 <>
-	Msg      string `json:"msg"`               // 中文描述（进 msg 字段）
-	Stage    string `json:"stage"`             // recon/bruteforce/exploit/c2/exfil
-	Severity int    `json:"severity"`          // 1-3
+	Action    string `json:"action"`   // alert
+	Protocol  string `json:"protocol"` // tcp/udp/http/dns...
+	SrcIP     string `json:"src_ip"`   // 支持 any / 单 IP / CIDR
+	SrcPort   string `json:"src_port"` // any / 22 / [1:200] / [80,443]
+	DstIP     string `json:"dst_ip"`
+	DstPort   string `json:"dst_port"`
+	Content   string `json:"content"`   // 可选：匹配内容（自动 nocase）
+	Direction string `json:"direction"` // -> 或 <>
+	Msg       string `json:"msg"`       // 中文描述（进 msg 字段）
+	Stage     string `json:"stage"`     // recon/bruteforce/exploit/c2/exfil
+	Severity  int    `json:"severity"`  // 1-3
 	Threshold struct {
 		Count   int `json:"count"`   // 0 = 不启用频次阈值
 		Seconds int `json:"seconds"` // 时间窗
@@ -122,8 +127,9 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	if technique == "" {
 		technique = "Custom Detection"
 	}
-	fmt.Fprintf(&b, "classtype:custom; metadata:stage %s, mitre_tactic %s, mitre_technique %s, author analyst; sid:%d; rev:1;)",
-		req.Stage, mitre, technique, sid)
+	// priority 显式写入，使引擎输出的告警 severity 与界面所选一致，而不是取 classtype 的默认优先级
+	fmt.Fprintf(&b, "classtype:%s; priority:%d; metadata:stage %s, mitre_tactic %s, mitre_technique %s, author analyst; sid:%d; rev:1;)",
+		stageClasstypes[req.Stage], req.Severity, req.Stage, mitre, technique, sid)
 
 	raw := b.String()
 
@@ -143,7 +149,7 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 
 	// 4. 写库 + 生成规则文件 + 校验 + 热重载（与启停同一链路，失败回滚）
 	severity := pgtype.Int4{Int32: int32(req.Severity), Valid: true}
-	classType := pgtype.Text{String: "custom", Valid: true}
+	classType := pgtype.Text{String: stageClasstypes[req.Stage], Valid: true}
 	stage := pgtype.Text{String: req.Stage, Valid: true}
 	mitreT := pgtype.Text{String: mitre, Valid: true}
 	mitreTech := pgtype.Text{String: technique, Valid: true}

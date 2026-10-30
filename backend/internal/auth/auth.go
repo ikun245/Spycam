@@ -19,9 +19,11 @@ import (
 const (
 	sessionPrefix   = "sess:"
 	loginFailPrefix = "loginfail:"
-	// 同一用户名 15 分钟内连续失败 5 次即锁定，锁定期内不再校验密码（防在线爆破）
-	maxLoginFailures = 5
-	loginLockWindow  = 15 * time.Minute
+	// 同一 用户名+来源IP 15 分钟内连续失败 5 次即锁定该组合（防在线爆破，且他人无法从别的 IP 把合法用户锁死）；
+	// 另设同一用户名跨所有 IP 的总阈值，防分布式爆破
+	maxLoginFailures     = 5
+	maxUserLoginFailures = 50
+	loginLockWindow      = 15 * time.Minute
 )
 
 var (
@@ -46,10 +48,14 @@ func NewService(pool *pgxpool.Pool, rdb *redis.Client, sessionTTL time.Duration)
 }
 
 // Login 校验用户名密码，成功返回会话 ID（存 Redis，TTL 到期自动失效）。
-// 失败计数按用户名存 Redis，达到阈值后返回 ErrLocked，直到窗口过期。
-func (s *Service) Login(ctx context.Context, username, password string) (sessionID, role string, err error) {
-	failKey := loginFailPrefix + strings.ToLower(username)
-	if n, _ := s.rdb.Get(ctx, failKey).Int(); n >= maxLoginFailures {
+// 失败计数存 Redis：键 用户名+clientIP 达 5 次、或用户名总计达 50 次即返回 ErrLocked，直到窗口过期。
+func (s *Service) Login(ctx context.Context, username, password, clientIP string) (sessionID, role string, err error) {
+	userKey := loginFailPrefix + "u:" + strings.ToLower(username)
+	pairKey := loginFailPrefix + "p:" + strings.ToLower(username) + "|" + clientIP
+	if n, _ := s.rdb.Get(ctx, pairKey).Int(); n >= maxLoginFailures {
+		return "", "", ErrLocked
+	}
+	if n, _ := s.rdb.Get(ctx, userKey).Int(); n >= maxUserLoginFailures {
 		return "", "", ErrLocked
 	}
 	var hash string
@@ -58,10 +64,11 @@ func (s *Service) Login(ctx context.Context, username, password string) (session
 	).Scan(&hash, &role)
 	// 统一返回未授权，不区分“用户不存在”与“密码错误”；两种情况都计入失败次数
 	if qerr != nil || !verifyArgon2id(password, hash) {
-		s.recordLoginFailure(ctx, failKey)
+		s.recordLoginFailure(ctx, pairKey)
+		s.recordLoginFailure(ctx, userKey)
 		return "", "", ErrUnauthorized
 	}
-	_ = s.rdb.Del(ctx, failKey).Err()
+	_ = s.rdb.Del(ctx, pairKey).Err()
 	sid, err := newSessionID()
 	if err != nil {
 		return "", "", fmt.Errorf("generate session: %w", err)
