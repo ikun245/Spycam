@@ -124,7 +124,8 @@ services:
     container_name: spycam-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      # 仅宿主机端口占用 WEB_PORT；容器内 80 与宿主机 nginx 的 80 互不冲突
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
     depends_on:
       - api
     networks: [internal]

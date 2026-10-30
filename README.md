@@ -5,7 +5,7 @@
 ## 架构
 
 ```text
-浏览器 ── web(nginx, 唯一对外 127.0.0.1:8080)
+浏览器 ── web(nginx, 唯一对外，默认 127.0.0.1:8080，可由 WEB_BIND/WEB_PORT 调整)
             └─ /api 反代 ── api(Go: REST+SSE+鉴权) ── PostgreSQL(事实源)
                                   │                      Redis(队列/流/会话/PubSub)
             worker(Go: 队列消费/eve采集/聚合/事件串联)
@@ -94,7 +94,36 @@ docker logs -f spycam-worker | grep live   # 看到 live capture ingest started
 | 云上 VPC | 阿里云/腾讯云/AWS 的“流量镜像”功能，以 VXLAN 封装送到本机网卡；Suricata 默认解码 4789/udp 的 VXLAN |
 | 远端主机临时抓包 | `ssh host "tcpdump -i eth0 -w - -G 300"` 落成 pcap 后走「数据与回放」上传回放 |
 
-访问界面：`web` 只绑定 `127.0.0.1:8080`，远程访问用 `ssh -L 8080:127.0.0.1:8080 user@server`，或在宿主机用 nginx/Caddy 加 HTTPS 反代到该端口（此时设 `COOKIE_SECURE=true`）；不要把 8080 直接改绑 `0.0.0.0` 裸奔 HTTP。
+#### 公网访问与端口
+
+整套系统只占用宿主机一个端口：`${WEB_BIND}:${WEB_PORT}`（默认 `127.0.0.1:8080`）。映射里的 `:80` 是容器内部端口，不占宿主机 80，与宿主机已有的 nginx 不冲突；postgres/redis/api 均不发布端口。8080 被占用时在 `.env` 改 `WEB_PORT`（如 `18080`）。
+
+默认只绑回环地址，所以公网直接访问 `http://公网IP:8080` 打不开。三种方式任选：
+
+1. **宿主机 nginx 反代（推荐，与现有站点共存）**：新增一个 server 或 location 反代到 `127.0.0.1:${WEB_PORT}`，配上证书后 `.env` 设 `COOKIE_SECURE=true`：
+
+   ```nginx
+   server {
+       listen 443 ssl;
+       server_name spycam.example.com;
+       ssl_certificate     /etc/nginx/certs/spycam.crt;
+       ssl_certificate_key /etc/nginx/certs/spycam.key;
+       location / {
+           proxy_pass http://127.0.0.1:8080;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_buffering off;        # 实时告警 SSE 需要
+           proxy_read_timeout 3600s;
+       }
+   }
+   ```
+
+   前端使用根路径 `/`，请用独立域名/端口的 server 块，不要挂在已有站点的子路径下。
+
+2. **直接暴露端口（仅测试）**：`.env` 设 `WEB_BIND=0.0.0.0`、`WEB_PORT=18080`、`COOKIE_SECURE=false`，云安全组/防火墙放行 18080，访问 `http://公网IP:18080`。明文 HTTP 会暴露登录口令，不建议长期使用。
+3. **SSH 隧道**：`ssh -L 8080:127.0.0.1:8080 user@server` 后本地访问 `http://127.0.0.1:8080`。
+
+能打开页面但登录后立刻掉回登录页：基本是用 HTTP 访问却设了 `COOKIE_SECURE=true`（浏览器丢弃 Secure Cookie），改回 `false` 或换 HTTPS。改 `.env` 后需 `docker compose up -d` 重建容器生效。若改过 `SEED_ADMIN_PASSWORD` 但数据库已初始化，旧密码仍有效（种子只在首次创建）。
 
 引擎模式说明：回放实例 `suricata` 与实时实例 `suricata-live` 是同一镜像的两个容器，共用 `rules-active` 规则目录，互不影响；不需要“切换”引擎，开启 `live` profile 即同时具备两种能力。
 
