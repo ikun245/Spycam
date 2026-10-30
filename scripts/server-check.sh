@@ -1,15 +1,45 @@
 #!/bin/sh
 # Spycam 服务器环境诊断（只读，不修改任何配置）。
-# 用法：在项目根目录执行  sh scripts/server-check.sh
-# 结果同时写入 spycam-check.log，把该文件内容发给维护者即可。
+# 用法：sh server-check.sh [项目目录]
+#   项目目录可省略：依次尝试参数、脚本上级目录、当前目录、运行中 spycam 容器记录的 compose 目录。
+# 结果同时写入 /tmp/spycam-check.log，把该文件内容发给维护者即可。
 # 注意：只输出 .env 中与网络/抓包相关的键，不输出任何密码或 token。
 
-cd "$(dirname "$0")/.." || exit 1
-LOG=spycam-check.log
+LOG=/tmp/spycam-check.log
+
+has_compose() { [ -f "$1/docker-compose.yml" ] || [ -f "$1/compose.yaml" ]; }
+
+PROJECT_DIR=""
+for d in "${1:-}" "$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)" "$(pwd)"; do
+  if [ -n "$d" ] && has_compose "$d"; then PROJECT_DIR="$d"; break; fi
+done
+if [ -z "${PROJECT_DIR}" ]; then
+  for c in spycam-web spycam-api spycam-worker; do
+    d=$(docker inspect "$c" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null)
+    if [ -n "$d" ] && has_compose "$d"; then PROJECT_DIR="$d"; break; fi
+  done
+fi
 
 section() { printf '\n===== %s =====\n' "$1"; }
 
 {
+  section "项目目录"
+  if [ -n "${PROJECT_DIR}" ]; then
+    echo "${PROJECT_DIR}"
+    cd "${PROJECT_DIR}" || exit 1
+    if grep -q 'profiles: \["live"\]' docker-compose.yml 2>/dev/null; then
+      echo "代码版本：旧版（suricata-live 仍需 --profile live），请更新代码后 docker compose up -d --build"
+    else
+      echo "代码版本：新版（suricata-live 默认启动）"
+    fi
+  else
+    echo "未找到 docker-compose.yml，请执行：sh server-check.sh /项目目录"
+  fi
+  for c in spycam-worker spycam-suricata-live; do
+    printf '%s 容器创建时间：' "$c"
+    docker inspect "$c" --format '{{.Created}}' 2>/dev/null || echo "容器不存在"
+  done
+
   section "时间与系统"
   date
   uname -a
@@ -62,4 +92,4 @@ section() { printf '\n===== %s =====\n' "$1"; }
   docker exec spycam-suricata-live sh -c 'grep -c "\"event_type\":\"alert\"" /var/log/suricata/live/eve.json 2>/dev/null || echo 0' 2>&1
 } 2>&1 | tee "${LOG}"
 
-printf '\n诊断结果已保存到 %s/%s\n' "$(pwd)" "${LOG}"
+printf '\n诊断结果已保存到 %s\n' "${LOG}"

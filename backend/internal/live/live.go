@@ -210,7 +210,7 @@ func (t *Tailer) Run(ctx context.Context) {
 		}
 		if _, err := os.Stat(t.EvePath); err != nil {
 			if !waitingLogged {
-				slog.Info("live eve not present, waiting (enable with --profile live)", "path", t.EvePath)
+				slog.Info("live eve not present, waiting for spycam-suricata-live", "path", t.EvePath)
 				waitingLogged = true
 			}
 			continue
